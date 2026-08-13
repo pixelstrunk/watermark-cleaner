@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wmc-cleaner"
+version = "0.2.0"
+description = "Remove AI text artifacts, AI phrases and file metadata before you publish. Detects and strips invisible unicode characters, losslessly cleans image metadata."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Christian Strunk" }]
+keywords = ["ai", "watermark", "unicode", "text-cleaning", "metadata", "publishing", "pre-commit", "trojan-source"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Topic :: Text Processing :: Filters",
+]
+
+[project.scripts]
+wmc = "wmc.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/pixelstrunk/wmc-cleaner"
+Issues = "https://github.com/pixelstrunk/wmc-cleaner/issues"
+Changelog = "https://github.com/pixelstrunk/wmc-cleaner/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+packages = ["wmc", "wmc.layers", "wmc.rewrite"]
+
+[tool.setuptools.package-dir]
+wmc = "python/wmc"
+"wmc.layers" = "python/wmc/layers"
+"wmc.rewrite" = "python/wmc/rewrite"
+
+[tool.setuptools.package-data]
+wmc = ["rules_data/*.json"]

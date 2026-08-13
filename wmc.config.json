@@ -1,0 +1,11 @@
+{
+  "voice": true,
+  "fix_safe_delete_phrases": true,
+  "replace_homoglyphs": false,
+  "strip_variation_selectors": false,
+  "keep_nbsp_in_numbers": true,
+  "normalize_form": "NFC",
+  "text_extensions": [".md", ".mdx", ".txt", ".html", ".htm", ".markdown"],
+  "image_extensions": [".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif", ".tif", ".tiff"],
+  "exclude": ["node_modules", ".git", "dist", "build", ".next", ".venv", "__pycache__"]
+}

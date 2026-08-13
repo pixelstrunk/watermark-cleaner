@@ -1,0 +1,32 @@
+{
+  "name": "wmc-cleaner",
+  "version": "0.2.0",
+  "description": "Remove AI text artifacts, AI phrases and file metadata before you publish. Detects and strips invisible unicode characters, losslessly cleans image metadata.",
+  "bin": {
+    "wmc": "bin/wmc.js"
+  },
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "rules_data"
+  ],
+  "keywords": [
+    "ai",
+    "watermark",
+    "unicode",
+    "text-cleaning",
+    "metadata",
+    "publishing"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pixelstrunk/wmc-cleaner"
+  }
+}

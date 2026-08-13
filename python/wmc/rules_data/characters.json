@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "remove_always": [
+    { "cp": "200B", "name": "zero width space" },
+    { "cp": "2060", "name": "word joiner" },
+    { "cp": "FEFF", "name": "zero width no-break space / bom" },
+    { "cp": "00AD", "name": "soft hyphen" },
+    { "cp": "180E", "name": "mongolian vowel separator" },
+    { "cp": "034F", "name": "combining grapheme joiner" },
+    { "cp": "2061", "name": "function application" },
+    { "cp": "2062", "name": "invisible times" },
+    { "cp": "2063", "name": "invisible separator" },
+    { "cp": "2064", "name": "invisible plus" }
+  ],
+  "remove_ranges": [
+    { "from": "E0000", "to": "E007F", "name": "unicode tag characters (hidden payload)" }
+  ],
+  "zwnj": {
+    "cp": "200C",
+    "name": "zero width non-joiner",
+    "policy": "remove unless adjacent to a script that requires it"
+  },
+  "joining_script_ranges": [
+    { "from": "0600", "to": "06FF", "name": "arabic" },
+    { "from": "0700", "to": "074F", "name": "syriac" },
+    { "from": "0750", "to": "077F", "name": "arabic supplement" },
+    { "from": "08A0", "to": "08FF", "name": "arabic extended-a" },
+    { "from": "0900", "to": "0D7F", "name": "indic scripts" },
+    { "from": "0D80", "to": "0DFF", "name": "sinhala" },
+    { "from": "0F00", "to": "0FFF", "name": "tibetan" },
+    { "from": "1000", "to": "109F", "name": "myanmar" },
+    { "from": "1780", "to": "17FF", "name": "khmer" },
+    { "from": "1800", "to": "18AF", "name": "mongolian" },
+    { "from": "FB50", "to": "FDFF", "name": "arabic presentation forms-a" },
+    { "from": "FE70", "to": "FEFF", "name": "arabic presentation forms-b" }
+  ],
+  "bidi_marks": [
+    { "cp": "200E", "name": "left-to-right mark" },
+    { "cp": "200F", "name": "right-to-left mark" },
+    { "cp": "061C", "name": "arabic letter mark" }
+  ],
+  "bidi_control_ranges": [
+    { "from": "202A", "to": "202E", "name": "bidi embedding / override" },
+    { "from": "2066", "to": "2069", "name": "bidi isolate" }
+  ],
+  "rtl_ranges": [
+    { "from": "0590", "to": "05FF", "name": "hebrew" },
+    { "from": "0600", "to": "08FF", "name": "arabic block" },
+    { "from": "FB1D", "to": "FDFD", "name": "presentation forms" },
+    { "from": "FE70", "to": "FEFC", "name": "arabic presentation forms-b" }
+  ],
+  "protect_zwj": "200D",
+  "variation_selectors": {
+    "from": "FE00",
+    "to": "FE0F",
+    "supplementary_from": "E0100",
+    "supplementary_to": "E01EF",
+    "strip_when_aggressive": true
+  },
+  "exotic_spaces_to_ascii": [
+    "00A0", "1680", "2000", "2001", "2002", "2003", "2004", "2005",
+    "2006", "2007", "2008", "2009", "200A", "202F", "205F", "3000"
+  ],
+  "number_space_guard": ["00A0", "202F", "2009", "2007"]
+}

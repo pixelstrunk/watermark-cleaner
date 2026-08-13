@@ -28,6 +28,7 @@ jobs:
           skip-existing: true
 
   npm:
+    if: false
     runs-on: ubuntu-latest
     permissions:
       id-token: write

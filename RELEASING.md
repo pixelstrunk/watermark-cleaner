@@ -29,23 +29,12 @@ The `release` workflow has three jobs:
 - **pypi**: builds the wheel and publishes to PyPI via trusted publishing
   (OpenID Connect, no token). Live now.
 - **github-release**: creates the GitHub release with generated notes. Live now.
-- **npm**: publishes the node package. Currently disabled with `if: false`
-  until npm trusted publishing is configured (see below).
+- **npm**: publishes the node package via trusted publishing (OpenID Connect,
+  no token). Live now.
 
-## Making npm automatic (pending)
-
-npm is not yet automated because it needs a one time setup on npmjs.com:
-
-1. On npmjs.com, open the `wmc-cleaner` package settings and add a **Trusted
-   Publisher** with:
-   - Owner: `pixelstrunk`
-   - Repository: `wmc-cleaner`
-   - Workflow filename: `release.yml`
-   - Environment: leave blank
-2. In `.github/workflows/release.yml`, remove the `if: false` line from the
-   `npm` job.
-
-After that, every tag publishes to PyPI and npm together.
+Both registries publish from the same tag. The npm trusted publisher is
+configured on npmjs.com for owner `pixelstrunk`, repository `wmc-cleaner`,
+workflow `release.yml`, no environment, action `npm publish`.
 
 ## Manual npm publish (fallback)
 

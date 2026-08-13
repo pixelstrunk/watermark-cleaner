@@ -24,6 +24,8 @@ jobs:
           python -m build
       - name: publish to pypi via trusted publishing
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
+        with:
+          skip-existing: true
 
   npm:
     runs-on: ubuntu-latest
@@ -39,8 +41,14 @@ jobs:
       - name: update npm for trusted publishing
         run: npm install -g npm@latest
       - name: publish to npm via trusted publishing
-        run: npm publish
         working-directory: node
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "wmc-cleaner@$version" version >/dev/null 2>&1; then
+            echo "wmc-cleaner@$version is already published, skipping"
+            exit 0
+          fi
+          npm publish
 
   github-release:
     runs-on: ubuntu-latest

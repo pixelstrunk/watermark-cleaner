@@ -44,6 +44,18 @@ jobs:
           diff -r rules python/watermark_cleaner/rules_data
           diff -r rules node/rules_data
 
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: version must be identical in pyproject, package.json and __init__.py
+        run: |
+          py=$(grep -E '^version = ' pyproject.toml | cut -d'"' -f2)
+          node=$(node -p "require('./node/package.json').version")
+          init=$(grep -E '^__version__' python/watermark_cleaner/__init__.py | cut -d'"' -f2)
+          echo "pyproject=$py package.json=$node __init__=$init"
+          test "$py" = "$node" && test "$py" = "$init"
+
   parity:
     runs-on: ubuntu-latest
     steps:

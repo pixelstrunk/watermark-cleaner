@@ -32,9 +32,9 @@ def _shape_regex(pattern):
 @lru_cache(maxsize=None)
 def _safe_delete_start_regex(phrase):
     return re.compile(
-        r"(?P<lead>^|[.!?][ \t]+|\n[ \t]*)(?<!\w)"
+        r"(?P<lead>^|[.!?][ \t]+|\r?\n[ \t]*)(?<!\w)"
         + _phrase_body(phrase)
-        + r"(?!\w)(?P<tail>[,;:]?[ \t]*)(?P<next>\n?[ \t]*[a-z])?",
+        + r"(?!\w)(?P<tail>[,;:]?[ \t]*)(?P<next>(?:\r?\n)?[ \t]*[a-z])?",
         re.IGNORECASE,
     )
 
@@ -127,21 +127,36 @@ def clean(text, config, rules):
             )
         )
 
-    shape_hits = []
+    shape_errors = []
+    shape_warns = []
     for shape in phrases.get("sentence_shapes", []):
         if shape["id"].lower() in ignore:
             continue
         if _shape_regex(shape["pattern"]).search(text):
-            shape_hits.append(shape["id"])
-    if shape_hits:
+            if shape.get("severity", "error") == "warn":
+                shape_warns.append(shape["id"])
+            else:
+                shape_errors.append(shape["id"])
+    if shape_errors:
         findings.append(
             Finding(
                 "voice",
                 "sentence-shape",
                 "error",
                 "ai sentence shapes present (rewrite required, not auto-fixed)",
-                len(shape_hits),
-                shape_hits[:8],
+                len(shape_errors),
+                shape_errors[:8],
+            )
+        )
+    if shape_warns:
+        findings.append(
+            Finding(
+                "voice",
+                "sentence-shape",
+                "warn",
+                "sentence patterns that can read as ai (fine in moderation)",
+                len(shape_warns),
+                shape_warns[:8],
             )
         )
 

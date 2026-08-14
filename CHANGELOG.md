@@ -3,6 +3,30 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- DOCX and ODT metadata stripping (`docProps/core.xml` and `docProps/app.xml` for DOCX, `meta.xml` for ODT): author, last-editor and creating-application fields are removed, container-level and lossless, with every other part of the archive copied through byte-for-byte. PDF is not supported yet.
+- Config files are now validated on load: wrong types (for example `"voice": 0`) fail with a clear message and exit code 2 instead of behaving differently per CLI.
+- Per-shape severity in the phrase rulebook. `not-only-but-also` and `less-x-more-y` now warn instead of block, because they flag ordinary English too often.
+- Parity CI now also compares the `--json` reports of both CLIs, not just file bytes and exit codes, and includes a CRLF fixture.
+
+### Fixed
+
+- Files with Windows (CRLF) line endings: front matter and code protection now works on them, and neither CLI rewrites line endings anymore. Previously the Node CLI could edit YAML front matter in CRLF files and the Python CLI silently converted every CRLF file to LF.
+- The `exclude` list no longer matches directories above the path you asked to scan. `check build/docs` previously scanned zero files and reported success in the Python CLI.
+- The Python CLI preserves file permissions when rewriting; previously rewritten files ended up owner-only (0600).
+- Password-protected DOCX/ODT no longer crash the Python CLI; both CLIs now report "could not parse" and leave the file alone. Metadata parts are also capped at 64 MB decompressed as a zip-bomb defense.
+- A directory named `.watermark-cleanerrc` no longer crashes the Node CLI during config lookup.
+- The Node CLI rejects unknown flags instead of silently ignoring them (a typo like `--agressive` used to no-op).
+- An invalid `WATERMARK_CLEANER_MAX_FILE_BYTES` value now falls back to the default with a warning in both CLIs, instead of crashing (Python) or silently disabling the size limit (Node).
+- `check` output now says "would fix" and "would change" instead of claiming files were fixed or changed during a read-only scan.
+- The Node CLI honors empty-string dash replacements in `dash_policy` and counts filler-phrase deletions the same way the Python CLI does.
+- `watermark-cleaner --version` in the Python package reports the correct version; CI now fails when the three version declarations drift.
+- The DeepL rewrite command writes atomically and refuses symlinks, like every other write path.
+- The sample git pre-commit hook no longer stages unrelated edits for partially staged files, and `integrations/deploy-gate.sh` now actually blocks on voice errors.
+
 ## [0.2.1] - 2026-08-14
 
 ### Changed

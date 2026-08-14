@@ -10,7 +10,7 @@ function counts(findings) {
 
 const PROTECT_AWARE = new Set(["typography", "voice"]);
 
-const PROTECTED = /^---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|(?![\s\S]))|```[\s\S]*?(?:```|(?![\s\S]))|~~~[\s\S]*?(?:~~~|(?![\s\S]))|`[^`\n]+`/g;
+const PROTECTED = /^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|(?![\s\S]))|```[\s\S]*?(?:```|(?![\s\S]))|~~~[\s\S]*?(?:~~~|(?![\s\S]))|`[^`\r\n]+`/g;
 
 function runOnUnprotected(fn, text, config, rules) {
   const parts = [];
@@ -53,8 +53,8 @@ function cleanText(text, config, rules, filePath) {
   const report = {
     path: filePath || "<text>",
     findings,
-    original_length: original.length,
-    cleaned_length: text.length,
+    original_length: [...original].length,
+    cleaned_length: [...text].length,
     changed: text !== original,
     counts: counts(findings),
     has_errors: findings.some((f) => f.severity === "error"),

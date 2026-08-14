@@ -4,6 +4,7 @@ const path = require("path");
 const { cleanText } = require("./core");
 const { loadRules } = require("./rules");
 const metadata = require("./metadata");
+const office = require("./office");
 const { tooLarge, isSymlink, writeAtomic } = require("./safeio");
 
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
@@ -34,6 +35,7 @@ function walk(target, exclude, acc) {
 function collectFiles(paths, config) {
   const textExt = new Set(config.text_extensions.map((e) => e.toLowerCase()));
   const imageExt = new Set(config.image_extensions.map((e) => e.toLowerCase()));
+  const documentExt = new Set((config.document_extensions || []).map((e) => e.toLowerCase()));
   const exclude = config.exclude || [];
   const all = [];
   const missing = [];
@@ -46,12 +48,23 @@ function collectFiles(paths, config) {
   }
   const textFiles = [];
   const imageFiles = [];
+  const documentFiles = [];
+  const seen = new Set();
   for (const file of all) {
+    let key;
+    try {
+      key = fs.realpathSync(file);
+    } catch (error) {
+      key = path.resolve(file);
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
     const ext = path.extname(file).toLowerCase();
     if (textExt.has(ext)) textFiles.push(file);
     else if (imageExt.has(ext)) imageFiles.push(file);
+    else if (documentExt.has(ext)) documentFiles.push(file);
   }
-  return { textFiles, imageFiles, missing };
+  return { textFiles, imageFiles, documentFiles, missing };
 }
 
 function skipReport(file, message) {
@@ -95,7 +108,7 @@ function backup(file) {
 
 function run(paths, config, write) {
   const rules = loadRules();
-  const { textFiles, imageFiles, missing } = collectFiles(paths, config);
+  const { textFiles, imageFiles, documentFiles, missing } = collectFiles(paths, config);
   const reports = [];
   for (const p of missing) reports.push(skipReport(p, "path not found"));
   for (const file of textFiles) reports.push(processTextFile(file, config, rules, write));
@@ -108,6 +121,14 @@ function run(paths, config, write) {
     }
     if (write) reports.push(metadata.cleanFile(file, true, doBackup, stripIcc));
     else reports.push(metadata.inspectFile(file, stripIcc));
+  }
+  for (const file of documentFiles) {
+    if (tooLarge(file, config)) {
+      reports.push(skipReport(file, "skipped (larger than max_file_bytes)"));
+      continue;
+    }
+    if (write) reports.push(office.cleanFile(file, true, doBackup));
+    else reports.push(office.inspectFile(file));
   }
   return reports;
 }

@@ -2,6 +2,7 @@ const fs = require("fs");
 
 const { cleanText } = require("../core");
 const { loadRules } = require("../rules");
+const { isSymlink, writeAtomic } = require("../safeio");
 
 const FREE_HOST = "https://api-free.deepl.com";
 const PRO_HOST = "https://api.deepl.com";
@@ -61,9 +62,12 @@ async function rewriteFile(path, sourceLang, pivotLang, write, config) {
     rewritten = cleanText(rewritten, config, loadRules(), path).text;
   }
   if (write) {
+    if (isSymlink(path)) {
+      throw new Error(`refusing to write through symlink: ${path}`);
+    }
     const bak = `${path}.bak`;
     if (!fs.existsSync(bak)) fs.copyFileSync(path, bak);
-    fs.writeFileSync(path, rewritten, "utf-8");
+    writeAtomic(path, rewritten);
   }
   return rewritten;
 }

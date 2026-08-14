@@ -15,10 +15,10 @@ _LAYERS = {
 _PROTECT_AWARE = {"typography", "voice"}
 
 _PROTECTED = re.compile(
-    r"\A---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|\Z)"
+    r"\A---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|\Z)"
     r"|```[\s\S]*?(?:```|\Z)"
     r"|~~~[\s\S]*?(?:~~~|\Z)"
-    r"|`[^`\n]+`"
+    r"|`[^`\r\n]+`"
 )
 
 

@@ -3,7 +3,7 @@
   description: Remove invisible unicode characters, normalize typography, strip image metadata. Never blocks on style.
   entry: watermark-cleaner fix --no-voice --no-backup --quiet
   language: python
-  files: '\.(md|mdx|markdown|txt|html?|svg|png|jpe?g|webp)$'
+  files: '\.(md|mdx|markdown|txt|html?|svg|png|jpe?g|webp|docx|odt)$'
 
 - id: watermark-cleaner-check
   name: watermark-cleaner voice gate

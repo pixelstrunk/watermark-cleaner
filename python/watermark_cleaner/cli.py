@@ -3,7 +3,7 @@ import json
 import sys
 
 from . import __version__
-from .config import apply_aggressive, load_config
+from .config import ConfigError, apply_aggressive, load_config
 from .report import render_report, render_summary
 from .runner import run
 
@@ -56,7 +56,7 @@ def _run_scan(args, write):
     if args.json:
         payload = {
             "mode": "fix" if write else "check",
-            "summary": render_summary(reports),
+            "summary": render_summary(reports, write),
             "reports": [r.to_dict() for r in reports],
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -64,9 +64,9 @@ def _run_scan(args, write):
         if not args.quiet:
             for report in reports:
                 if report.findings:
-                    print(render_report(report))
+                    print(render_report(report, write))
         print()
-        print(render_summary(reports))
+        print(render_summary(reports, write))
 
     blocking = any(r.has_blocking for r in reports)
     if blocking and (not write or getattr(args, "strict", False)):
@@ -95,12 +95,16 @@ def _run_rewrite(args):
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command == "check":
-        return _run_scan(args, write=False)
-    if args.command == "fix":
-        return _run_scan(args, write=True)
-    if args.command == "rewrite":
-        return _run_rewrite(args)
+    try:
+        if args.command == "check":
+            return _run_scan(args, write=False)
+        if args.command == "fix":
+            return _run_scan(args, write=True)
+        if args.command == "rewrite":
+            return _run_rewrite(args)
+    except (ConfigError, FileNotFoundError) as error:
+        print(str(error), file=sys.stderr)
+        return 2
     parser.print_help()
     return 1
 

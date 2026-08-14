@@ -7,15 +7,22 @@ if ! command -v watermark-cleaner >/dev/null 2>&1; then
 fi
 
 files=$(git diff --cached --name-only --diff-filter=ACM \
-  | grep -Ei '\.(md|mdx|markdown|txt|html?|svg|png|jpe?g|webp|gif)$' || true)
+  | grep -Ei '\.(md|mdx|markdown|txt|html?|svg|png|jpe?g|webp|gif|docx|odt)$' || true)
 
 if [ -z "$files" ]; then
   exit 0
 fi
 
+unstaged=$(git diff --name-only)
+
 cleaned=0
+skipped=0
 while IFS= read -r f; do
   [ -f "$f" ] || continue
+  if printf '%s\n' "$unstaged" | grep -qxF "$f"; then
+    skipped=$((skipped + 1))
+    continue
+  fi
   watermark-cleaner fix "$f" --no-voice --no-backup --quiet >/dev/null
   git add "$f"
   cleaned=$((cleaned + 1))
@@ -23,4 +30,7 @@ done <<< "$files"
 
 if [ "$cleaned" -gt 0 ]; then
   echo "watermark-cleaner: cleaned $cleaned staged file(s)"
+fi
+if [ "$skipped" -gt 0 ]; then
+  echo "watermark-cleaner: skipped $skipped partially staged file(s), run watermark-cleaner fix on them manually"
 fi

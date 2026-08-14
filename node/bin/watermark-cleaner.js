@@ -1,28 +1,36 @@
 #!/usr/bin/env node
-const { loadConfig, applyAggressive } = require("../src/config");
+const { loadConfig, applyAggressive, ConfigError } = require("../src/config");
 const { run } = require("../src/runner");
-const { renderReport, renderSummary } = require("../src/report");
+const { renderReport, renderSummary, serializeReport } = require("../src/report");
 
 const VALUE_FLAGS = new Set(["config", "source-lang", "pivot-lang"]);
+const KNOWN_FLAGS = {
+  check: new Set(["config", "json", "no-voice", "aggressive", "no-backup", "quiet", "strict"]),
+  fix: new Set(["config", "json", "no-voice", "aggressive", "no-backup", "quiet", "strict"]),
+  rewrite: new Set(["config", "source-lang", "pivot-lang", "write"]),
+};
 
-function parseArgs(argv) {
+function parseArgs(argv, known) {
   const args = { paths: [], flags: {} };
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token.startsWith("--")) {
       const eqIndex = token.indexOf("=");
+      const name = eqIndex !== -1 ? token.slice(2, eqIndex) : token.slice(2);
+      if (!known.has(name)) {
+        throw new Error(`unknown option: --${name}`);
+      }
       if (eqIndex !== -1) {
-        const name = token.slice(2, eqIndex);
-        const val = token.slice(eqIndex + 1);
-        args.flags[name] = val;
-      } else {
-        const name = token.slice(2);
-        if (VALUE_FLAGS.has(name)) {
-          args.flags[name] = argv[i + 1];
-          i += 1;
-        } else {
-          args.flags[name] = true;
+        args.flags[name] = token.slice(eqIndex + 1);
+      } else if (VALUE_FLAGS.has(name)) {
+        const value = argv[i + 1];
+        if (value === undefined || value.startsWith("--")) {
+          throw new Error(`option --${name} requires a value`);
         }
+        args.flags[name] = value;
+        i += 1;
+      } else {
+        args.flags[name] = true;
       }
     } else {
       args.paths.push(token);
@@ -49,13 +57,13 @@ function runScan(command, args) {
   const reports = run(paths, config, write);
 
   if (args.flags.json) {
-    console.log(JSON.stringify({ mode: command, summary: renderSummary(reports), reports }, null, 2));
+    console.log(JSON.stringify({ mode: command, summary: renderSummary(reports, write), reports: reports.map(serializeReport) }, null, 2));
   } else {
     if (!args.flags.quiet) {
-      for (const report of reports) if (report.findings.length) console.log(renderReport(report));
+      for (const report of reports) if (report.findings.length) console.log(renderReport(report, write));
     }
     console.log("");
-    console.log(renderSummary(reports));
+    console.log(renderSummary(reports, write));
   }
 
   const blocking = reports.some((r) => r.has_errors);
@@ -92,11 +100,22 @@ async function main() {
     console.log(`watermark-cleaner ${require("../package.json").version}`);
     process.exit(0);
   }
-  const args = parseArgs(argv);
-  if (command === "check" || command === "fix") return runScan(command, args);
-  if (command === "rewrite") return runRewrite(args);
-  usage();
-  process.exit(command === "--help" || command === "-h" ? 0 : 1);
+  if (!Object.prototype.hasOwnProperty.call(KNOWN_FLAGS, command)) {
+    usage();
+    process.exit(command === "--help" || command === "-h" ? 0 : 1);
+  }
+  let args;
+  try {
+    args = parseArgs(argv, KNOWN_FLAGS[command]);
+    if (command === "check" || command === "fix") return runScan(command, args);
+    return await runRewrite(args);
+  } catch (error) {
+    if (error instanceof ConfigError || /^unknown option: --|^option --.+ requires a value$|^config not found: /.test(error.message)) {
+      console.error(error.message);
+      process.exit(2);
+    }
+    throw error;
+  }
 }
 
 main();

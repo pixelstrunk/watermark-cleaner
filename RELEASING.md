@@ -10,9 +10,10 @@ tokens, no local publishing, no passkey prompts.
 
 ## Step by step
 
-1. Bump the version in both package files, they must stay in sync:
+1. Bump the version in all three files, they must stay in sync (CI fails if they drift):
    - `pyproject.toml` -> `version = "X.Y.Z"`
    - `node/package.json` -> `"version": "X.Y.Z"`
+   - `python/watermark_cleaner/__init__.py` -> `__version__ = "X.Y.Z"`
 2. Update `CHANGELOG.md`.
 3. Commit and push to `main`.
 4. Create and push the tag:

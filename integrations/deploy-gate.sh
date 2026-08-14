@@ -11,4 +11,7 @@ fi
 echo "watermark-cleaner: cleaning mechanical artifacts and image metadata"
 watermark-cleaner fix "$CONTENT_DIR" --no-voice
 
-echo "watermark-cleaner: mechanical clean done"
+echo "watermark-cleaner: checking for blocking ai phrases and sentence shapes"
+watermark-cleaner check "$CONTENT_DIR" --quiet
+
+echo "watermark-cleaner: gate passed"

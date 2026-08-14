@@ -20,17 +20,18 @@ after    "Smart quotes \"work\", and a hidden watermark"
 
 ```
 $ watermark-cleaner check post.md
-post.md
-  characters   fixed  removed zero width space (U+200B)          x2
-  typography   fixed  straightened smart quotes                  x2
-  voice        error  ai phrases present (rewrite required)      x1
+post.md  (1 error, 5 would fix)
+  [block] ai phrases present (rewrite required, not auto-fixed) x1  (in today's fast-paced world)
+  [would fix] removed zero width space (U+200B) x2
+  [would fix] straightened smart quotes x2
+  [would fix] replaced em/en dash per policy x1
 
-1 file checked, 1 blocked
+1 files scanned  |  1 would change  |  5 would fix  |  0 warnings  |  1 blocking
 $ echo $?
 1
 ```
 
-`check` reports and never changes anything. `fix` cleans in place and writes a `.bak` backup next to every changed file.
+`check` reports and never changes anything. `fix` cleans in place and writes a `.bak` backup next to every changed file. The backup keeps the first original: running `fix` again after editing does not overwrite an existing `.bak`.
 
 ## Install
 
@@ -78,9 +79,28 @@ Deliberately preserved, because removing them breaks legitimate text:
 - Non breaking spaces between digits (`12 000` keeps its formatting) unless you disable `keep_nbsp_in_numbers`.
 - Variation selectors, unless you pass `--aggressive`.
 
+## Coverage
+
+| Channel | Handled | Notes |
+|---|---|---|
+| Invisible/format Unicode (ZWSP, bidi, tag chars, homoglyphs) | Yes | Deterministic, verifiable |
+| Typography (smart quotes, dashes, ellipsis) | Yes | Deterministic, verifiable |
+| AI filler phrases and sentence shapes | Yes | Filler removed, shapes flagged |
+| Image metadata: EXIF, XMP, C2PA, comments | JPEG, PNG, WebP, SVG | Lossless, container-level |
+| Image metadata: GIF, TIFF | No | Reported, file left untouched |
+| Document metadata: DOCX, ODT | Yes | Lossless, container-level (see below) |
+| Document metadata: PDF | Not yet | See [Non-goals](#non-goals-stated-plainly) |
+| Statistical/token-level text watermarks (SynthID-style) | Best-effort only, opt-in | Via [DeepL rewrite](#optional-deepl-rewrite), not a deterministic strip |
+| Pixel-domain image watermarks | No | Out of scope, see below |
+| Training-time backdoors | No | Out of scope, not a watermarking concern this tool addresses |
+
 ## Image metadata, losslessly
 
 `watermark-cleaner fix` strips EXIF, XMP, C2PA and comment segments from JPEG, PNG and WebP at the container level. Pixels are never re-encoded, so there is no quality loss and the operation is verifiable with a byte diff. ICC color profiles are kept by default, because removing them visibly shifts colors in the browser; strip them too with `"strip_icc": true` or `--aggressive`. SVG metadata, XMP blocks and XML comments are removed as text. GIF and TIFF are never modified; the tool tells you it cannot strip them losslessly and leaves them alone. Files that fail to parse are left untouched.
+
+## Document metadata, losslessly
+
+DOCX and ODT are ZIP containers. `watermark-cleaner fix` strips the author, last-editor and creating-application fields from the small metadata part inside them (`docProps/core.xml` and `docProps/app.xml` for DOCX, `meta.xml` for ODT) and rewrites the archive with every other part, including the document body, styles and embedded images, copied through byte-for-byte, verifiable with a byte diff exactly like the image path. Title, subject, keywords and description are left alone; those are content you likely want, not a machine fingerprint. Files that fail to parse as a well-formed ZIP are left untouched. PDF is not supported yet.
 
 ## Use as a publish gate
 
@@ -89,7 +109,7 @@ With the [pre-commit](https://pre-commit.com) framework:
 ```yaml
 repos:
   - repo: https://github.com/pixelstrunk/watermark-cleaner
-    rev: v0.2.0
+    rev: v0.2.1
     hooks:
       - id: watermark-cleaner-fix
 ```
@@ -108,7 +128,7 @@ Cleaning AI text falls into buckets, and this tool is precise about which bucket
 |---|---|---|
 | Characters | Invisible and format characters, exotic spaces, homoglyphs, NFC normalization | Fixed, 100% verifiable |
 | Typography | Smart quotes, ellipsis and bullet glyphs, em and en dashes | Fixed, 100% verifiable |
-| File metadata | EXIF, XMP and C2PA in images, metadata and comments in SVG | Stripped losslessly, 100% verifiable |
+| File metadata | EXIF, XMP and C2PA in images, metadata and comments in SVG, author/app fields in DOCX and ODT | Stripped losslessly, 100% verifiable |
 | Voice | AI filler phrases and AI sentence shapes from a portable rulebook | Filler removed, shapes flagged and blocked |
 
 The voice layer auto-deletes only phrases that are pure filler ("without further ado"). When a deletion opens a sentence, the sentence is repaired: leftover spaces go away and the next word is capitalized. Phrases that carry an object ("let's explore the API") are never cut mid-sentence; they are flagged as errors for a human to rewrite. The phrase rulebook is currently English only.
@@ -118,6 +138,9 @@ The voice layer auto-deletes only phrases that are pure filler ("without further
 - It does not remove statistical text watermarks (the SynthID style signal that some vendors embed in word choice). No deterministic tool can, and there is no public detector to verify removal. Only substantial rewriting degrades that signal.
 - It does not auto-rewrite AI sentence shapes. Rewriting a sentence needs judgment, so the tool detects and blocks those shapes instead of replacing them and producing nonsense.
 - It does not certify that text will pass any AI detector, and it is not a way to misrepresent authorship.
+- It does not touch PDF metadata yet. That is a real gap for a "clean before you publish" tool and may land in a future release; today the safest path is to export to a supported format before running the cleaner.
+- It does not detect or remove pixel-domain image watermarks (SynthID-class, StegaStamp, Tree-Ring and similar signals embedded in the pixels themselves). That is a fundamentally different, model-heavy problem; this tool only ever touches metadata containers and text, never re-encodes pixels.
+- It does not address training-time backdoors or any watermarking mechanism baked into a model's weights. Out of scope for a client-side content cleaner.
 
 ## Configure
 

@@ -30,10 +30,7 @@
     "00B7": "-"
   },
   "dash_policy": {
-    "em_dash": "2014",
-    "en_dash": "2013",
     "spaced_replacement": ", ",
-    "unspaced_replacement": "-",
-    "mode": "replace"
+    "unspaced_replacement": "-"
   }
 }

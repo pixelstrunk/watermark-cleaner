@@ -12,10 +12,17 @@ function clean(text, overrides) {
 }
 
 let passed = 0;
+let failed = 0;
 function ok(name, fn) {
-  fn();
-  passed += 1;
-  console.log(`ok  ${name}`);
+  try {
+    fn();
+    passed += 1;
+    console.log(`ok  ${name}`);
+  } catch (error) {
+    failed += 1;
+    console.error(`FAIL  ${name}`);
+    console.error(error && error.stack ? error.stack : error);
+  }
 }
 
 ok("removes zero width space", () => {
@@ -365,4 +372,281 @@ ok("oversized file skipped", () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+const zlib = require("zlib");
+const office = require("../src/office");
+
+ok("crc32 matches known vectors", () => {
+  assert.strictEqual(office.crc32(Buffer.from("")), 0);
+  assert.strictEqual(office.crc32(Buffer.from("The quick brown fox jumps over the lazy dog")), 0x414fa339);
+});
+
+function buildZip(entries) {
+  const ZIP_STORED = 0;
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const nameBuf = Buffer.from(entry.name, "utf-8");
+    const contentBuf = Buffer.from(entry.content, "utf-8");
+    const method = entry.method === undefined ? 8 : entry.method;
+    const compData = method === ZIP_STORED ? contentBuf : zlib.deflateRawSync(contentBuf);
+    const crc = office.crc32(contentBuf);
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(method, 8);
+    localHeader.writeUInt16LE(0, 10);
+    localHeader.writeUInt16LE(0x21, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(compData.length, 18);
+    localHeader.writeUInt32LE(contentBuf.length, 22);
+    localHeader.writeUInt16LE(nameBuf.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    const localOffset = offset;
+    localParts.push(localHeader, nameBuf, compData);
+    offset += localHeader.length + nameBuf.length + compData.length;
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(method, 10);
+    centralHeader.writeUInt16LE(0, 12);
+    centralHeader.writeUInt16LE(0x21, 14);
+    centralHeader.writeUInt32LE(crc, 16);
+    centralHeader.writeUInt32LE(compData.length, 20);
+    centralHeader.writeUInt32LE(contentBuf.length, 24);
+    centralHeader.writeUInt16LE(nameBuf.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(localOffset, 42);
+    centralParts.push(centralHeader, nameBuf);
+  }
+  const localBuf = Buffer.concat(localParts);
+  const centralBuf = Buffer.concat(centralParts);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(centralBuf.length, 12);
+  eocd.writeUInt32LE(localBuf.length, 16);
+  eocd.writeUInt16LE(0, 20);
+  return Buffer.concat([localBuf, centralBuf, eocd]);
+}
+
+function readZipEntries(buffer) {
+  let eocdOffset = -1;
+  for (let i = buffer.length - 22; i >= 0; i -= 1) {
+    if (buffer.readUInt32LE(i) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  assert.ok(eocdOffset !== -1);
+  const total = buffer.readUInt16LE(eocdOffset + 10);
+  const cdOffset = buffer.readUInt32LE(eocdOffset + 16);
+  const result = {};
+  const order = [];
+  let pos = cdOffset;
+  for (let i = 0; i < total; i += 1) {
+    assert.strictEqual(buffer.readUInt32LE(pos), 0x02014b50);
+    const method = buffer.readUInt16LE(pos + 10);
+    const csize = buffer.readUInt32LE(pos + 20);
+    const nameLen = buffer.readUInt16LE(pos + 28);
+    const extraLen = buffer.readUInt16LE(pos + 30);
+    const commentLen = buffer.readUInt16LE(pos + 32);
+    const localOffset = buffer.readUInt32LE(pos + 42);
+    const name = buffer.subarray(pos + 46, pos + 46 + nameLen).toString("utf-8");
+    const nameLenLocal = buffer.readUInt16LE(localOffset + 26);
+    const extraLenLocal = buffer.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + nameLenLocal + extraLenLocal;
+    const compData = buffer.subarray(dataStart, dataStart + csize);
+    const content = method === 0 ? compData : zlib.inflateRawSync(compData);
+    result[name] = { content: content.toString("utf-8"), method };
+    order.push(name);
+    pos += 46 + nameLen + extraLen + commentLen;
+  }
+  return { entries: result, order };
+}
+
+const DOCX_CORE = '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>Quarterly Report</dc:title><dc:creator>Jane Doe</dc:creator><cp:lastModifiedBy>Jane Doe</cp:lastModifiedBy></cp:coreProperties>';
+const DOCX_APP = '<Properties xmlns="app"><Application>Microsoft Office Word</Application><Company>Acme Inc</Company><Manager>Jane Doe</Manager></Properties>';
+const DOCX_DOCUMENT = '<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>Hello world</w:t></w:r></w:p></w:body></w:document>';
+const ODT_META = '<office:document-meta xmlns:office="office" xmlns:dc="dc" xmlns:meta="meta"><office:meta><meta:generator>SomeWordProcessor/1.0</meta:generator><meta:initial-creator>Jane Doe</meta:initial-creator><dc:creator>Jane Doe</dc:creator></office:meta></office:document-meta>';
+const ODT_CONTENT = '<office:document-content xmlns:office="office"><office:body>Hello world</office:body></office:document-content>';
+const ODT_MIMETYPE = "application/vnd.oasis.opendocument.text";
+
+function makeDocx(core, app, document) {
+  return buildZip([
+    { name: "[Content_Types].xml", content: "<Types/>" },
+    { name: "word/document.xml", content: document !== undefined ? document : DOCX_DOCUMENT },
+    { name: "docProps/core.xml", content: core !== undefined ? core : DOCX_CORE },
+    { name: "docProps/app.xml", content: app !== undefined ? app : DOCX_APP },
+  ]);
+}
+
+function makeOdt(meta, content) {
+  return buildZip([
+    { name: "mimetype", content: ODT_MIMETYPE, method: 0 },
+    { name: "META-INF/manifest.xml", content: "<manifest/>" },
+    { name: "content.xml", content: content !== undefined ? content : ODT_CONTENT },
+    { name: "meta.xml", content: meta !== undefined ? meta : ODT_META },
+  ]);
+}
+
+ok("docx strips author and app metadata, preserves document body", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "report.docx");
+  fs.writeFileSync(target, makeDocx());
+  const report = office.cleanFile(target, true, false);
+  assert.strictEqual(report.changed, true);
+  assert.strictEqual(report.counts.fixed, 5);
+  const { entries } = readZipEntries(fs.readFileSync(target));
+  assert.ok(!entries["docProps/core.xml"].content.includes("Jane Doe"));
+  assert.ok(entries["docProps/core.xml"].content.includes("Quarterly Report"));
+  assert.ok(!entries["docProps/app.xml"].content.includes("Microsoft Office Word"));
+  assert.ok(!entries["docProps/app.xml"].content.includes("Acme Inc"));
+  assert.strictEqual(entries["word/document.xml"].content, DOCX_DOCUMENT);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("odt strips creator and generator, keeps mimetype first and stored", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "notes.odt");
+  fs.writeFileSync(target, makeOdt());
+  const report = office.cleanFile(target, true, false);
+  assert.strictEqual(report.changed, true);
+  const { entries, order } = readZipEntries(fs.readFileSync(target));
+  assert.strictEqual(order[0], "mimetype");
+  assert.strictEqual(entries.mimetype.method, 0);
+  assert.ok(!entries["meta.xml"].content.includes("Jane Doe"));
+  assert.ok(!entries["meta.xml"].content.includes("SomeWordProcessor"));
+  assert.strictEqual(entries["content.xml"].content, ODT_CONTENT);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("already-clean docx is left byte-identical", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "clean.docx");
+  const core = '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>Quarterly Report</dc:title></cp:coreProperties>';
+  const app = '<Properties xmlns="app"></Properties>';
+  const original = makeDocx(core, app);
+  fs.writeFileSync(target, original);
+  const report = office.cleanFile(target, true, false);
+  assert.strictEqual(report.changed, false);
+  assert.ok(fs.readFileSync(target).equals(original));
+  assert.ok(!fs.existsSync(`${target}.bak`));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("docx inspect mode does not write", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "report.docx");
+  const original = makeDocx();
+  fs.writeFileSync(target, original);
+  const report = office.inspectFile(target);
+  assert.strictEqual(report.changed, false);
+  assert.strictEqual(report.counts.warn, 5);
+  assert.ok(fs.readFileSync(target).equals(original));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("corrupt docx reports warning and leaves file untouched", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "broken.docx");
+  const original = Buffer.from("not actually a zip file");
+  fs.writeFileSync(target, original);
+  const report = office.cleanFile(target, true, false);
+  assert.strictEqual(report.changed, false);
+  assert.ok(fs.readFileSync(target).equals(original));
+  assert.ok(report.findings.some((f) => f.message.includes("could not parse")));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("docx backup created when enabled", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "report.docx");
+  fs.writeFileSync(target, makeDocx());
+  office.cleanFile(target, true, true);
+  assert.ok(fs.existsSync(`${target}.bak`));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+const { loadConfig } = require("../src/config");
+
+ok("crlf front matter is protected and line endings preserved", () => {
+  const text = '---\r\ntitle: "Foo — Bar"\r\n---\r\n\r\nBody — text.\r\n';
+  const result = clean(text);
+  assert.ok(result.text.includes('title: "Foo — Bar"'));
+  assert.ok(result.text.includes("Body, text."));
+  assert.ok(result.text.includes("\r\n"));
+});
+
+ok("crlf filler phrase at line start is removed and repaired", () => {
+  const text = "First line.\r\nIt's worth noting that the cache is cold.\r\n";
+  const result = clean(text);
+  assert.strictEqual(result.text, "First line.\r\nThe cache is cold.\r\n");
+});
+
+ok("empty dash replacement in config is honored", () => {
+  const result = clean("fast — slow", { dash_policy: { spaced_replacement: "" } });
+  assert.strictEqual(result.text, "fastslow");
+});
+
+ok("non-boolean config value is rejected with a clear error", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  fs.writeFileSync(nodePath.join(tmp, "watermark-cleaner.config.json"), '{"voice": 0}');
+  assert.throws(() => loadConfig(undefined, tmp), /"voice" must be true or false/);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("directory named like an rc file does not crash config lookup", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  fs.mkdirSync(nodePath.join(tmp, ".watermark-cleanerrc"));
+  const config = loadConfig(undefined, tmp);
+  assert.strictEqual(config.voice, true);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("warn-severity sentence shapes do not block", () => {
+  const result = clean("Not only fast, but also reliable.");
+  const shape = result.report.findings.find((f) => f.kind === "sentence-shape");
+  assert.ok(shape);
+  assert.strictEqual(shape.severity, "warn");
+  assert.strictEqual(result.report.has_errors, false);
+});
+
+ok("filler count reflects actual deletions", () => {
+  const text = "It's worth noting that a. It's worth noting that b.";
+  const result = clean(text);
+  const filler = result.report.findings.find((f) => f.kind === "filler-phrase");
+  assert.strictEqual(filler.count, 2);
+});
+
+ok("encrypted zip entry is refused, file untouched", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "enc.docx");
+  const buffer = makeDocx();
+  const centralOffset = buffer.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  assert.ok(centralOffset > 0);
+  buffer.writeUInt16LE(1, centralOffset + 8);
+  fs.writeFileSync(target, buffer);
+  const report = office.cleanFile(target, true, false);
+  assert.ok(report.findings.some((f) => f.message.includes("could not parse")));
+  assert.ok(fs.readFileSync(target).equals(buffer));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+if (failed) {
+  console.error(`\n${passed} passed, ${failed} FAILED`);
+  process.exit(1);
+}
 console.log(`\n${passed} node tests passed`);

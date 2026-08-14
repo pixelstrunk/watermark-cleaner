@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping. This project is small on purpose, and contributions that keep it small are the most welcome kind.
+Thanks for helping. This project is small on purpose, and contributions that keep it small are the most welcome kind. By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## The one rule that matters
 

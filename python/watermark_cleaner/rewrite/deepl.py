@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ..core import clean_text
 from ..rules import load_rules
+from ..safeio import is_symlink, write_text_atomic
 
 _FREE_HOST = "https://api-free.deepl.com"
 _PRO_HOST = "https://api.deepl.com"
@@ -74,8 +75,10 @@ def rewrite_file(path, target_lang=None, pivot_lang="EN", write=False, config=No
     if config is not None:
         rewritten, _ = clean_text(rewritten, config=config, rules=load_rules(), path=str(path))
     if write:
+        if is_symlink(path):
+            raise RuntimeError(f"refusing to write through symlink: {path}")
         backup = Path(path).with_suffix(Path(path).suffix + ".bak")
         if not backup.exists():
             backup.write_bytes(Path(path).read_bytes())
-        Path(path).write_text(rewritten, encoding="utf-8")
+        write_text_atomic(path, rewritten)
     return rewritten

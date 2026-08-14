@@ -2,7 +2,7 @@ from pathlib import Path
 
 from .core import clean_text
 from .findings import Finding, Report
-from .layers import metadata
+from .layers import metadata, office
 from .rules import load_rules
 from .safeio import is_symlink, too_large, write_text_atomic
 
@@ -10,9 +10,11 @@ from .safeio import is_symlink, too_large, write_text_atomic
 def collect_files(paths, config):
     text_ext = {e.lower() for e in config["text_extensions"]}
     image_ext = {e.lower() for e in config["image_extensions"]}
+    document_ext = {e.lower() for e in config.get("document_extensions", [])}
     exclude = set(config.get("exclude", []))
     text_files = []
     image_files = []
+    document_files = []
     missing = []
     for raw in paths:
         base = Path(raw)
@@ -20,23 +22,37 @@ def collect_files(paths, config):
             missing.append(base)
             continue
         if base.is_file():
-            _classify(base, text_ext, image_ext, text_files, image_files)
+            _classify(base, text_ext, image_ext, document_ext, text_files, image_files, document_files)
             continue
         for item in sorted(base.rglob("*")):
             if not item.is_file():
                 continue
-            if any(part in exclude for part in item.parts):
+            if any(part in exclude for part in item.relative_to(base).parts):
                 continue
-            _classify(item, text_ext, image_ext, text_files, image_files)
-    return text_files, image_files, missing
+            _classify(item, text_ext, image_ext, document_ext, text_files, image_files, document_files)
+    return _dedupe(text_files), _dedupe(image_files), _dedupe(document_files), missing
 
 
-def _classify(item, text_ext, image_ext, text_files, image_files):
+def _dedupe(files):
+    seen = set()
+    result = []
+    for item in files:
+        key = item.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
+def _classify(item, text_ext, image_ext, document_ext, text_files, image_files, document_files):
     suffix = item.suffix.lower()
     if suffix in text_ext:
         text_files.append(item)
     elif suffix in image_ext:
         image_files.append(item)
+    elif suffix in document_ext:
+        document_files.append(item)
 
 
 def process_text_file(path, config, rules, write):
@@ -45,7 +61,8 @@ def process_text_file(path, config, rules, write):
         report.findings.append(Finding("io", "read", "warn", "skipped (larger than max_file_bytes)", 1))
         return report
     try:
-        original = Path(path).read_text(encoding="utf-8")
+        with open(path, "r", encoding="utf-8", newline="") as handle:
+            original = handle.read()
     except (UnicodeDecodeError, OSError):
         report.findings.append(Finding("io", "read", "warn", "skipped (not utf-8 text)", 1))
         return report
@@ -64,7 +81,7 @@ def process_text_file(path, config, rules, write):
 
 def run(paths, config, write):
     rules = load_rules()
-    text_files, image_files, missing = collect_files(paths, config)
+    text_files, image_files, document_files, missing = collect_files(paths, config)
     reports = []
     for path in missing:
         report = Report(path=str(path))
@@ -84,6 +101,16 @@ def run(paths, config, write):
             reports.append(metadata.clean_file(path, write=True, backup=backup, strip_icc=strip_icc))
         else:
             reports.append(metadata.inspect_file(path, strip_icc=strip_icc))
+    for path in document_files:
+        if too_large(path, config):
+            report = Report(path=str(path))
+            report.findings.append(Finding("io", "read", "warn", "skipped (larger than max_file_bytes)", 1))
+            reports.append(report)
+            continue
+        if write:
+            reports.append(office.clean_file(path, write=True, backup=backup))
+        else:
+            reports.append(office.inspect_file(path))
     return reports
 
 

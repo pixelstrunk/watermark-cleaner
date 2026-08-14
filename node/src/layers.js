@@ -167,8 +167,8 @@ function cleanTypography(text, config, rules) {
 
   if (config.fix_dashes !== false) {
     const policy = { ...typo.dash_policy, ...(config.dash_policy || {}) };
-    const spaced = policy.spaced_replacement || ", ";
-    const unspaced = policy.unspaced_replacement || "-";
+    const spaced = policy.spaced_replacement !== undefined ? policy.spaced_replacement : ", ";
+    const unspaced = policy.unspaced_replacement !== undefined ? policy.unspaced_replacement : "-";
     const nSpaced = countMatches(text, DASH_SPACED);
     text = text.replace(DASH_SPACED, spaced);
     const nUnspaced = countMatches(text, DASH_ANY);
@@ -252,7 +252,7 @@ function shapeRegex(pattern) {
 }
 
 function safeDeleteStartRegex(phrase) {
-  return cachedRegex(`sds:${phrase}`, () => new RegExp(`(^|[.!?][ \\t]+|\\n[ \\t]*)(?<!\\w)${phraseBody(phrase)}(?!\\w)([,;:]?[ \\t]*)(\\n?[ \\t]*[a-z])?`, "gi"));
+  return cachedRegex(`sds:${phrase}`, () => new RegExp(`(^|[.!?][ \\t]+|\\r?\\n[ \\t]*)(?<!\\w)${phraseBody(phrase)}(?!\\w)([,;:]?[ \\t]*)((?:\\r?\\n)?[ \\t]*[a-z])?`, "gi"));
 }
 
 function safeDeleteMidRegex(phrase) {
@@ -284,9 +284,16 @@ function safeDeleteMidSub(match, pre, tail, offset, whole) {
 }
 
 function safeDelete(text, phrase) {
-  return text
-    .replace(safeDeleteStartRegex(phrase), safeDeleteStartSub)
-    .replace(safeDeleteMidRegex(phrase), safeDeleteMidSub);
+  let count = 0;
+  text = text.replace(safeDeleteStartRegex(phrase), (...args) => {
+    count += 1;
+    return safeDeleteStartSub(...args);
+  });
+  text = text.replace(safeDeleteMidRegex(phrase), (...args) => {
+    count += 1;
+    return safeDeleteMidSub(...args);
+  });
+  return { text, count };
 }
 
 function withoutIgnored(items, ignore) {
@@ -302,11 +309,9 @@ function cleanVoice(text, config, rules) {
   if (config.fix_safe_delete_phrases !== false) {
     let removed = 0;
     for (const phrase of withoutIgnored(phrases.safe_delete_phrases || [], ignore)) {
-      const count = countMatches(text, phraseRegex(phrase));
-      if (count) {
-        removed += count;
-        text = safeDelete(text, phrase);
-      }
+      const result = safeDelete(text, phrase);
+      text = result.text;
+      removed += result.count;
     }
     if (removed) {
       findings.push(finding("voice", "filler-phrase", "fixed", "removed filler phrases", removed));
@@ -325,12 +330,17 @@ function cleanVoice(text, config, rules) {
   }
   if (bannedTotal) findings.push(finding("voice", "banned-phrase", "error", "ai phrases present (rewrite required, not auto-fixed)", bannedTotal, bannedHits.slice(0, 8)));
 
-  const shapeHits = [];
+  const shapeErrors = [];
+  const shapeWarns = [];
   for (const shape of phrases.sentence_shapes || []) {
     if (ignore.has(shape.id.toLowerCase())) continue;
-    if (shapeRegex(shape.pattern).test(text)) shapeHits.push(shape.id);
+    if (shapeRegex(shape.pattern).test(text)) {
+      if ((shape.severity || "error") === "warn") shapeWarns.push(shape.id);
+      else shapeErrors.push(shape.id);
+    }
   }
-  if (shapeHits.length) findings.push(finding("voice", "sentence-shape", "error", "ai sentence shapes present (rewrite required, not auto-fixed)", shapeHits.length, shapeHits.slice(0, 8)));
+  if (shapeErrors.length) findings.push(finding("voice", "sentence-shape", "error", "ai sentence shapes present (rewrite required, not auto-fixed)", shapeErrors.length, shapeErrors.slice(0, 8)));
+  if (shapeWarns.length) findings.push(finding("voice", "sentence-shape", "warn", "sentence patterns that can read as ai (fine in moderation)", shapeWarns.length, shapeWarns.slice(0, 8)));
 
   let lexTotal = 0;
   const lexExamples = [];

@@ -49,7 +49,6 @@
     { "from": "FB1D", "to": "FDFD", "name": "presentation forms" },
     { "from": "FE70", "to": "FEFC", "name": "arabic presentation forms-b" }
   ],
-  "protect_zwj": "200D",
   "variation_selectors": {
     "from": "FE00",
     "to": "FE0F",

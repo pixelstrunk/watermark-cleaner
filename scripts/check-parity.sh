@@ -27,4 +27,16 @@ if [ "$py_exit" != "$node_exit" ]; then
   exit 1
 fi
 
-echo "parity ok: identical output and exit codes"
+canonical() {
+  python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin), sort_keys=True, indent=1))"
+}
+
+PYTHONPATH="$ROOT/python" python3 -m watermark_cleaner.cli check "$TMP/py" --json | sed "s|$TMP/py|<dir>|g" | canonical > "$TMP/py.json" || true
+node "$ROOT/node/bin/watermark-cleaner.js" check "$TMP/node" --json | sed "s|$TMP/node|<dir>|g" | canonical > "$TMP/node.json" || true
+
+if ! diff "$TMP/py.json" "$TMP/node.json"; then
+  echo "parity check failed: json reports differ"
+  exit 1
+fi
+
+echo "parity ok: identical output, json reports and exit codes"

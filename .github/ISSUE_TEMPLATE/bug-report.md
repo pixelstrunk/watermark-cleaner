@@ -15,6 +15,6 @@ The exact command and, if possible, a minimal input file. For image bugs, attach
 
 **Versions**
 
-- wmc version (`wmc --version`):
+- watermark-cleaner version (`watermark-cleaner --version`):
 - Python or Node CLI:
 - OS:

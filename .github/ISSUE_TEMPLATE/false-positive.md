@@ -11,7 +11,7 @@ Paste the exact input text. If it contains invisible characters, paste it escape
 
 **What the tool did**
 
-Output of `wmc check <file> --json` for the affected file, or the relevant part of it.
+Output of `watermark-cleaner check <file> --json` for the affected file, or the relevant part of it.
 
 **Why this is wrong**
 
@@ -19,6 +19,6 @@ For example: the character is required in this script, the phrase is normal usag
 
 **Versions**
 
-- wmc version (`wmc --version`):
+- watermark-cleaner version (`watermark-cleaner --version`):
 - Python or Node CLI:
 - OS:

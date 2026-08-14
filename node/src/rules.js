@@ -5,7 +5,7 @@ const RULE_FILES = ["characters", "typography", "phrases", "homoglyphs"];
 
 function candidateDirs() {
   const dirs = [];
-  if (process.env.WMC_RULES_DIR) dirs.push(process.env.WMC_RULES_DIR);
+  if (process.env.WATERMARK_CLEANER_RULES_DIR) dirs.push(process.env.WATERMARK_CLEANER_RULES_DIR);
   dirs.push(path.join(__dirname, "..", "rules_data"));
   let current = __dirname;
   for (let i = 0; i < 6; i += 1) {
@@ -19,7 +19,7 @@ function resolveDir() {
   for (const dir of candidateDirs()) {
     if (fs.existsSync(path.join(dir, "characters.json"))) return dir;
   }
-  throw new Error("wmc rules not found. set WMC_RULES_DIR or run from the repository.");
+  throw new Error("watermark-cleaner rules not found. set WATERMARK_CLEANER_RULES_DIR or run from the repository.");
 }
 
 let cache = null;

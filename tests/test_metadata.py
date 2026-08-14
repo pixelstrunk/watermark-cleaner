@@ -6,9 +6,9 @@ from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "python"))
-os.environ.setdefault("WMC_RULES_DIR", os.path.join(ROOT, "rules"))
+os.environ.setdefault("WATERMARK_CLEANER_RULES_DIR", os.path.join(ROOT, "rules"))
 
-from wmc.layers.metadata import _strip_jpeg, _strip_png, _strip_webp, clean_file
+from watermark_cleaner.layers.metadata import _strip_jpeg, _strip_png, _strip_webp, clean_file
 
 
 def jpeg_segment(marker, payload):

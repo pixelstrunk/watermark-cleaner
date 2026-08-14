@@ -6,12 +6,12 @@ from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "python"))
-os.environ.setdefault("WMC_RULES_DIR", os.path.join(ROOT, "rules"))
+os.environ.setdefault("WATERMARK_CLEANER_RULES_DIR", os.path.join(ROOT, "rules"))
 
-from wmc.config import DEFAULTS
-from wmc.rules import load_rules
-from wmc.runner import process_text_file
-from wmc.safeio import write_text_atomic
+from watermark_cleaner.config import DEFAULTS
+from watermark_cleaner.rules import load_rules
+from watermark_cleaner.runner import process_text_file
+from watermark_cleaner.safeio import write_text_atomic
 
 
 class AtomicWrites(unittest.TestCase):
@@ -21,7 +21,7 @@ class AtomicWrites(unittest.TestCase):
             target.write_text("old", encoding="utf-8")
             write_text_atomic(str(target), "new")
             self.assertEqual(target.read_text(encoding="utf-8"), "new")
-            self.assertEqual(list(Path(tmp).glob("*.wmc-tmp")), [])
+            self.assertEqual(list(Path(tmp).glob("*.watermark-cleaner-tmp")), [])
 
     def test_write_refuses_symlink(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: rule files must be identical in all packages
         run: |
-          diff -r rules python/wmc/rules_data
+          diff -r rules python/watermark_cleaner/rules_data
           diff -r rules node/rules_data
 
   parity:
@@ -70,12 +70,12 @@ jobs:
       - name: install python package and smoke test
         run: |
           pip install .
-          wmc --version
-          wmc check tests/fixtures/parity || test $? -eq 1
+          watermark-cleaner --version
+          watermark-cleaner check tests/fixtures/parity || test $? -eq 1
       - name: pack node package and smoke test
         run: |
           npm install -g ./node
-          wmc --version
+          watermark-cleaner --version
 
   pip-audit:
     runs-on: ubuntu-latest

@@ -1,9 +1,9 @@
 ---
-name: wmc-cleaner
+name: watermark-cleaner
 description: Remove AI text artifacts, hidden unicode characters and file metadata from content the user owns. Use when the user asks to clean AI-generated text, remove invisible watermark characters, normalize typography, strip image metadata, or check content before publishing.
 ---
 
-# WMC Cleaner
+# Watermark Cleaner
 
 Deterministic, offline cleaning of machine-generated traces in text and images. Everything runs locally; nothing is sent anywhere unless the user explicitly asks for the DeepL rewrite.
 
@@ -12,7 +12,7 @@ Deterministic, offline cleaning of machine-generated traces in text and images. 
 Check whether the CLI is available, and install it if not:
 
 ```
-wmc --version || pipx install wmc-cleaner || npm install -g wmc-cleaner
+watermark-cleaner --version || pipx install watermark-cleaner || npm install -g watermark-cleaner
 ```
 
 ## Workflow
@@ -20,7 +20,7 @@ wmc --version || pipx install wmc-cleaner || npm install -g wmc-cleaner
 1. Always inspect first, never modify without showing what was found:
 
 ```
-wmc check <path>
+watermark-cleaner check <path>
 ```
 
 2. Report the findings to the user grouped by layer (characters, typography, metadata, voice). `check` changes nothing and exits 1 when blocking AI phrases are present.
@@ -28,7 +28,7 @@ wmc check <path>
 3. Clean only after the user confirms:
 
 ```
-wmc fix <path>
+watermark-cleaner fix <path>
 ```
 
 `fix` writes a `.bak` backup next to every changed file. Use `--no-backup` only inside git hooks where git itself is the backup.

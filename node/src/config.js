@@ -21,7 +21,7 @@ const DEFAULTS = {
   exclude: ["node_modules", ".git", "dist", "build", ".next", ".venv", "__pycache__"],
 };
 
-const CONFIG_NAMES = ["wmc.config.json", ".wmcrc.json", ".wmcrc"];
+const CONFIG_NAMES = ["watermark-cleaner.config.json", ".watermark-cleanerrc.json", ".watermark-cleanerrc"];
 
 function findConfigFile(explicitPath, startDir) {
   if (explicitPath) {

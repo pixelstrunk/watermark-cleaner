@@ -44,8 +44,8 @@ jobs:
         working-directory: node
         run: |
           version=$(node -p "require('./package.json').version")
-          if npm view "wmc-cleaner@$version" version >/dev/null 2>&1; then
-            echo "wmc-cleaner@$version is already published, skipping"
+          if npm view "watermark-cleaner@$version" version >/dev/null 2>&1; then
+            echo "watermark-cleaner@$version is already published, skipping"
             exit 0
           fi
           npm publish

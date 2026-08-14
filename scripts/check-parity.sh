@@ -9,8 +9,8 @@ trap 'rm -rf "$TMP"' EXIT
 cp -R "$SRC" "$TMP/py"
 cp -R "$SRC" "$TMP/node"
 
-PYTHONPATH="$ROOT/python" python3 -m wmc.cli fix "$TMP/py" --no-backup --quiet >/dev/null
-node "$ROOT/node/bin/wmc.js" fix "$TMP/node" --no-backup --quiet >/dev/null
+PYTHONPATH="$ROOT/python" python3 -m watermark_cleaner.cli fix "$TMP/py" --no-backup --quiet >/dev/null
+node "$ROOT/node/bin/watermark-cleaner.js" fix "$TMP/node" --no-backup --quiet >/dev/null
 
 if ! diff -r "$TMP/py" "$TMP/node"; then
   echo "parity check failed: python and node produced different output"
@@ -19,8 +19,8 @@ fi
 
 py_exit=0
 node_exit=0
-PYTHONPATH="$ROOT/python" python3 -m wmc.cli check "$TMP/py" --quiet >/dev/null || py_exit=$?
-node "$ROOT/node/bin/wmc.js" check "$TMP/node" --quiet >/dev/null || node_exit=$?
+PYTHONPATH="$ROOT/python" python3 -m watermark_cleaner.cli check "$TMP/py" --quiet >/dev/null || py_exit=$?
+node "$ROOT/node/bin/watermark-cleaner.js" check "$TMP/node" --quiet >/dev/null || node_exit=$?
 
 if [ "$py_exit" != "$node_exit" ]; then
   echo "parity check failed: exit codes differ (python=$py_exit node=$node_exit)"

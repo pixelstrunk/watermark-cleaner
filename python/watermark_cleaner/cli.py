@@ -10,16 +10,16 @@ from .runner import run
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog="wmc",
-        description="WMC Cleaner: remove ai text artifacts, ai phrases and file metadata.",
+        prog="watermark-cleaner",
+        description="Watermark Cleaner: remove ai text artifacts, ai phrases and file metadata.",
     )
-    parser.add_argument("--version", action="version", version=f"wmc {__version__}")
+    parser.add_argument("--version", action="version", version=f"watermark-cleaner {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     for name in ("check", "fix"):
         p = sub.add_parser(name, help=f"{name} files or folders")
         p.add_argument("paths", nargs="*", default=["."], help="files or folders (default: .)")
-        p.add_argument("--config", help="path to a wmc config file")
+        p.add_argument("--config", help="path to a watermark-cleaner config file")
         p.add_argument("--json", action="store_true", help="emit json report")
         p.add_argument("--no-voice", action="store_true", help="disable the voice/ai-phrase layer")
         p.add_argument("--aggressive", action="store_true", help="also replace homoglyphs and strip variation selectors")
@@ -32,7 +32,7 @@ def build_parser():
     rewrite.add_argument("--source-lang", default=None, help="document language (default: auto-detect via deepl)")
     rewrite.add_argument("--pivot-lang", default="EN", help="intermediate language for back-translation (default EN)")
     rewrite.add_argument("--write", action="store_true", help="write result back (default prints)")
-    rewrite.add_argument("--config", help="path to a wmc config file")
+    rewrite.add_argument("--config", help="path to a watermark-cleaner config file")
     return parser
 
 

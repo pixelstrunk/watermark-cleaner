@@ -38,7 +38,7 @@ def _translate(text, api_key, target_lang, source_lang=None):
         headers={
             "Authorization": f"DeepL-Auth-Key {api_key}",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "wmc-cleaner/0.2",
+            "User-Agent": "watermark-cleaner/0.2",
         },
     )
     try:

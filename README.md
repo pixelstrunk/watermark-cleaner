@@ -1,13 +1,13 @@
-# WMC Cleaner
+# Watermark Cleaner
 
 Remove AI text artifacts, hidden unicode characters and file metadata before you publish.
 
-[![ci](https://github.com/pixelstrunk/wmc-cleaner/actions/workflows/ci.yml/badge.svg)](https://github.com/pixelstrunk/wmc-cleaner/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/wmc-cleaner)](https://pypi.org/project/wmc-cleaner/)
-[![npm](https://img.shields.io/npm/v/wmc-cleaner)](https://www.npmjs.com/package/wmc-cleaner)
+[![ci](https://github.com/pixelstrunk/watermark-cleaner/actions/workflows/ci.yml/badge.svg)](https://github.com/pixelstrunk/watermark-cleaner/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/watermark-cleaner)](https://pypi.org/project/watermark-cleaner/)
+[![npm](https://img.shields.io/npm/v/watermark-cleaner)](https://www.npmjs.com/package/watermark-cleaner)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-WMC Cleaner is a deterministic, offline, zero-dependency tool for content you own. It cleans the mechanical traces that mark text as machine generated, flags the stylistic phrases that read as AI writing, and strips identifying metadata from images without touching a single pixel. It ships as a Python CLI and a Node CLI that share one rule set and are tested to behave identically.
+Watermark Cleaner is a deterministic, offline, zero-dependency tool for content you own. It cleans the mechanical traces that mark text as machine generated, flags the stylistic phrases that read as AI writing, and strips identifying metadata from images without touching a single pixel. It ships as a Python CLI and a Node CLI that share one rule set and are tested to behave identically.
 
 ## See it
 
@@ -19,7 +19,7 @@ after    "Smart quotes \"work\", and a hidden watermark"
 ```
 
 ```
-$ wmc check post.md
+$ watermark-cleaner check post.md
 post.md
   characters   fixed  removed zero width space (U+200B)          x2
   typography   fixed  straightened smart quotes                  x2
@@ -36,22 +36,22 @@ $ echo $?
 
 | Ecosystem | One-shot | Install |
 |---|---|---|
-| Python | `uvx wmc-cleaner check .` or `pipx run wmc-cleaner check .` | `pipx install wmc-cleaner` |
-| Node | `npx wmc-cleaner check .` | `npm install -g wmc-cleaner` |
+| Python | `uvx watermark-cleaner check .` or `pipx run watermark-cleaner check .` | `pipx install watermark-cleaner` |
+| Node | `npx watermark-cleaner check .` | `npm install -g watermark-cleaner` |
 | pre-commit | see below | `.pre-commit-config.yaml` snippet |
 | From source | | `pip install .` or `npm install -g ./node` |
 
-Both packages install a single command, `wmc`, available in every folder, like git.
+Both packages install a single command, `watermark-cleaner`, available in every folder, like git.
 
 ## Use
 
 ```
-wmc check .          # report only, changes nothing, exits non zero if blocked
-wmc fix .            # clean in place, writes a .bak backup per changed file
-wmc check post.md
-wmc fix ./content --no-voice
-wmc fix ./assets --aggressive     # also replace homoglyphs and strip variation selectors
-wmc check . --json
+watermark-cleaner check .          # report only, changes nothing, exits non zero if blocked
+watermark-cleaner fix .            # clean in place, writes a .bak backup per changed file
+watermark-cleaner check post.md
+watermark-cleaner fix ./content --no-voice
+watermark-cleaner fix ./assets --aggressive     # also replace homoglyphs and strip variation selectors
+watermark-cleaner check . --json
 ```
 
 `check` is safe to run over an entire folder to see what is inside without touching anything. Exit codes: `check` returns 1 when a file contains AI phrases or AI sentence shapes, so it works as a publish gate. `fix` returns 0 after cleaning what it can; pass `--strict` to make `fix` return 1 when blocking findings remain that need a human rewrite.
@@ -80,7 +80,7 @@ Deliberately preserved, because removing them breaks legitimate text:
 
 ## Image metadata, losslessly
 
-`wmc fix` strips EXIF, XMP, C2PA and comment segments from JPEG, PNG and WebP at the container level. Pixels are never re-encoded, so there is no quality loss and the operation is verifiable with a byte diff. ICC color profiles are kept by default, because removing them visibly shifts colors in the browser; strip them too with `"strip_icc": true` or `--aggressive`. SVG metadata, XMP blocks and XML comments are removed as text. GIF and TIFF are never modified; the tool tells you it cannot strip them losslessly and leaves them alone. Files that fail to parse are left untouched.
+`watermark-cleaner fix` strips EXIF, XMP, C2PA and comment segments from JPEG, PNG and WebP at the container level. Pixels are never re-encoded, so there is no quality loss and the operation is verifiable with a byte diff. ICC color profiles are kept by default, because removing them visibly shifts colors in the browser; strip them too with `"strip_icc": true` or `--aggressive`. SVG metadata, XMP blocks and XML comments are removed as text. GIF and TIFF are never modified; the tool tells you it cannot strip them losslessly and leaves them alone. Files that fail to parse are left untouched.
 
 ## Use as a publish gate
 
@@ -88,15 +88,15 @@ With the [pre-commit](https://pre-commit.com) framework:
 
 ```yaml
 repos:
-  - repo: https://github.com/pixelstrunk/wmc-cleaner
+  - repo: https://github.com/pixelstrunk/watermark-cleaner
     rev: v0.2.0
     hooks:
-      - id: wmc-fix
+      - id: watermark-cleaner-fix
 ```
 
-`wmc-fix` cleans the mechanical layers on every commit and never blocks on style. Add `id: wmc-check` if you also want commits blocked on AI phrases. A plain git hook and a deploy gate script live in [`integrations/`](integrations/).
+`watermark-cleaner-fix` cleans the mechanical layers on every commit and never blocks on style. Add `id: watermark-cleaner-check` if you also want commits blocked on AI phrases. A plain git hook and a deploy gate script live in [`integrations/`](integrations/).
 
-Coding agents can drive the CLI through the skill in [`skills/wmc-cleaner/`](skills/wmc-cleaner/), which enforces an inspect-first workflow.
+Coding agents can drive the CLI through the skill in [`skills/watermark-cleaner/`](skills/watermark-cleaner/), which enforces an inspect-first workflow.
 
 All writes are safe by construction: files are replaced atomically, writes through symlinks are refused, and files larger than `max_file_bytes` (default 256 MiB) are skipped instead of loaded into memory.
 
@@ -121,7 +121,7 @@ The voice layer auto-deletes only phrases that are pure filler ("without further
 
 ## Configure
 
-Drop a `wmc.config.json` in a project root. Any key overrides the default.
+Drop a `watermark-cleaner.config.json` in a project root. Any key overrides the default.
 
 ```json
 {
@@ -146,9 +146,9 @@ By default a spaced em dash ("fast — slow") becomes a comma ("fast, slow") and
 
 ```
 export DEEPL_API_KEY=your-key
-wmc rewrite post.md
-wmc rewrite post.md --source-lang DE --pivot-lang EN
-wmc rewrite post.md --write
+watermark-cleaner rewrite post.md
+watermark-cleaner rewrite post.md --source-lang DE --pivot-lang EN
+watermark-cleaner rewrite post.md --write
 ```
 
 The document language is auto-detected by DeepL when `--source-lang` is not given.

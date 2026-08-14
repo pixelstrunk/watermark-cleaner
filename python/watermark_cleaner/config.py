@@ -21,7 +21,7 @@ DEFAULTS = {
     "exclude": ["node_modules", ".git", "dist", "build", ".next", ".venv", "__pycache__"],
 }
 
-CONFIG_NAMES = ["wmc.config.json", ".wmcrc.json", ".wmcrc"]
+CONFIG_NAMES = ["watermark-cleaner.config.json", ".watermark-cleanerrc.json", ".watermark-cleanerrc"]
 
 
 def load_config(explicit_path=None, start_dir="."):

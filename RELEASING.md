@@ -1,6 +1,6 @@
 # Releasing
 
-How a new version of WMC Cleaner reaches PyPI and npm.
+How a new version of Watermark Cleaner reaches PyPI and npm.
 
 ## The short version
 
@@ -17,7 +17,7 @@ tokens, no local publishing, no passkey prompts.
 3. Commit and push to `main`.
 4. Create and push the tag:
    ```
-   git tag -a vX.Y.Z -m "wmc-cleaner vX.Y.Z"
+   git tag -a vX.Y.Z -m "watermark-cleaner vX.Y.Z"
    git push origin vX.Y.Z
    ```
 5. The `release` workflow runs and publishes.
@@ -33,7 +33,7 @@ The `release` workflow has three jobs:
   no token). Live now.
 
 Both registries publish from the same tag. The npm trusted publisher is
-configured on npmjs.com for owner `pixelstrunk`, repository `wmc-cleaner`,
+configured on npmjs.com for owner `pixelstrunk`, repository `watermark-cleaner`,
 workflow `release.yml`, no environment, action `npm publish`.
 
 ## Manual npm publish (fallback)

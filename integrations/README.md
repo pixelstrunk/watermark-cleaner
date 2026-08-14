@@ -1,6 +1,6 @@
 # Integrations
 
-Three ready patterns for running WMC Cleaner automatically.
+Three ready patterns for running Watermark Cleaner automatically.
 
 ## pre-commit framework (recommended)
 
@@ -8,16 +8,16 @@ The repository ships hook definitions for [pre-commit](https://pre-commit.com). 
 
 ```yaml
 repos:
-  - repo: https://github.com/pixelstrunk/wmc-cleaner
+  - repo: https://github.com/pixelstrunk/watermark-cleaner
     rev: v0.2.0
     hooks:
-      - id: wmc-fix
+      - id: watermark-cleaner-fix
 ```
 
-`wmc-fix` cleans the mechanical layers (invisible characters, typography, image metadata) on every commit and never blocks on style. Add `wmc-check` as a second hook if you also want commits blocked when AI phrases are present:
+`watermark-cleaner-fix` cleans the mechanical layers (invisible characters, typography, image metadata) on every commit and never blocks on style. Add `watermark-cleaner-check` as a second hook if you also want commits blocked when AI phrases are present:
 
 ```yaml
-      - id: wmc-check
+      - id: watermark-cleaner-check
 ```
 
 ## Plain git hook
@@ -29,12 +29,12 @@ cp integrations/pre-commit /path/to/repo/.git/hooks/pre-commit
 chmod +x /path/to/repo/.git/hooks/pre-commit
 ```
 
-It runs `wmc fix --no-voice --no-backup` on every staged text and image file and re-stages the cleaned result. It requires `wmc` to be installed globally and exits silently when it is not.
+It runs `watermark-cleaner fix --no-voice --no-backup` on every staged text and image file and re-stages the cleaned result. It requires `watermark-cleaner` to be installed globally and exits silently when it is not.
 
 ## Deploy gate
 
-Call `deploy-gate.sh` from your deploy script before the build step. It runs the mechanical clean on your content directory (default `content`, override with `WMC_CONTENT_DIR`) and fails only when `wmc` is missing.
+Call `deploy-gate.sh` from your deploy script before the build step. It runs the mechanical clean on your content directory (default `content`, override with `WATERMARK_CLEANER_CONTENT_DIR`) and fails only when `watermark-cleaner` is missing.
 
 ## Why the defaults run with --no-voice
 
-If your project already has a voice or prose linter, let that tool own stylistic blocking and let WMC Cleaner own the mechanical clean. Turn the voice layer on in a gate only where you want WMC Cleaner to be the enforcer.
+If your project already has a voice or prose linter, let that tool own stylistic blocking and let Watermark Cleaner own the mechanical clean. Turn the voice layer on in a gate only where you want Watermark Cleaner to be the enforcer.

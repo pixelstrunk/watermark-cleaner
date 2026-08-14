@@ -4,10 +4,10 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "python"))
-os.environ.setdefault("WMC_RULES_DIR", os.path.join(ROOT, "rules"))
+os.environ.setdefault("WATERMARK_CLEANER_RULES_DIR", os.path.join(ROOT, "rules"))
 
-from wmc.config import DEFAULTS, apply_aggressive
-from wmc.core import clean_text
+from watermark_cleaner.config import DEFAULTS, apply_aggressive
+from watermark_cleaner.core import clean_text
 
 
 def clean(text, **overrides):

@@ -1,13 +1,13 @@
-- id: wmc-fix
-  name: wmc mechanical clean
+- id: watermark-cleaner-fix
+  name: watermark-cleaner mechanical clean
   description: Remove invisible unicode characters, normalize typography, strip image metadata. Never blocks on style.
-  entry: wmc fix --no-voice --no-backup --quiet
+  entry: watermark-cleaner fix --no-voice --no-backup --quiet
   language: python
   files: '\.(md|mdx|markdown|txt|html?|svg|png|jpe?g|webp)$'
 
-- id: wmc-check
-  name: wmc voice gate
+- id: watermark-cleaner-check
+  name: watermark-cleaner voice gate
   description: Block the commit when AI phrases or AI sentence shapes are present. Report only, changes nothing.
-  entry: wmc check --quiet
+  entry: watermark-cleaner check --quiet
   language: python
   files: '\.(md|mdx|markdown|txt|html?)$'

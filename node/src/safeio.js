@@ -6,7 +6,7 @@ const DEFAULT_MAX_FILE_BYTES = 256 * 1024 * 1024;
 
 function maxFileBytes(config) {
   if (config && config.max_file_bytes) return Number(config.max_file_bytes);
-  if (process.env.WMC_MAX_FILE_BYTES) return Number(process.env.WMC_MAX_FILE_BYTES);
+  if (process.env.WATERMARK_CLEANER_MAX_FILE_BYTES) return Number(process.env.WATERMARK_CLEANER_MAX_FILE_BYTES);
   return DEFAULT_MAX_FILE_BYTES;
 }
 
@@ -31,7 +31,7 @@ function writeAtomic(file, data) {
     throw new Error(`refusing to write through symlink: ${file}`);
   }
   const dir = path.dirname(file);
-  const temp = path.join(dir, `${path.basename(file)}.${crypto.randomBytes(6).toString("hex")}.wmc-tmp`);
+  const temp = path.join(dir, `${path.basename(file)}.${crypto.randomBytes(6).toString("hex")}.watermark-cleaner-tmp`);
   try {
     fs.writeFileSync(temp, data);
     fs.renameSync(temp, file);

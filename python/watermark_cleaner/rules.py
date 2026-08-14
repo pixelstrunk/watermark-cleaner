@@ -7,7 +7,7 @@ _RULE_FILES = ["characters", "typography", "phrases", "homoglyphs"]
 
 
 def _candidate_dirs():
-    env = os.environ.get("WMC_RULES_DIR")
+    env = os.environ.get("WATERMARK_CLEANER_RULES_DIR")
     if env:
         yield Path(env)
     here = Path(__file__).resolve()
@@ -23,7 +23,7 @@ def _resolve_dir():
         if candidate.is_dir() and (candidate / "characters.json").is_file():
             return candidate
     raise FileNotFoundError(
-        "wmc rules not found. set WMC_RULES_DIR or run from the repository."
+        "watermark-cleaner rules not found. set WATERMARK_CLEANER_RULES_DIR or run from the repository."
     )
 
 

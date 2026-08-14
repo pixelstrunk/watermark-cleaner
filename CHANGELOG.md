@@ -13,7 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Bidi marks and bidi controls (LRM, RLM, ALM, embeddings, isolates) are kept with a warning when the document contains right-to-left text. In pure left-to-right documents they are removed as before (Trojan Source defense).
 - Deleting a filler phrase now repairs the sentence: leftover spaces are removed and the first letter after the deletion is capitalized when the phrase opened a sentence.
 - "let's explore", "let's unpack" and "let's take a closer look" are no longer auto-deleted, because they usually carry an object and deleting them breaks the sentence. They are still flagged as blocking phrases.
-- The dash replacement policy can now be overridden per project via the `dash_policy` key in `wmc.config.json`.
+- The dash replacement policy can now be overridden per project via the `dash_policy` key in `watermark-cleaner.config.json`.
 - The Python package is now built from the repository root, which makes the repo usable directly as a pre-commit hook repository.
 
 - Typography and voice rules no longer touch fenced code blocks, inline code or YAML frontmatter. Invisible characters are still removed inside code (Trojan Source defense). Disable via `protect_code: false`.
@@ -22,19 +22,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - The non breaking space number guard now uses ascii digits in both engines; Python previously accepted all unicode digits while Node did not.
 - The Node directory walker no longer follows directory symlinks, which prevents infinite loops, and matches the Python behavior for symlinked files.
 - All phrase and shape regexes are compiled once and cached instead of being recompiled per file.
-- `wmc rewrite` auto-detects the document language via DeepL when `--source-lang` is not given, instead of assuming German, and reports rate limit and quota errors in plain language.
+- `watermark-cleaner rewrite` auto-detects the document language via DeepL when `--source-lang` is not given, instead of assuming German, and reports rate limit and quota errors in plain language.
 
 ### Added
 
 - The Node CLI accepts `--flag=value` syntax in addition to `--flag value`, matching the Python CLI.
 - WebP cleaning also strips C2PA content credential chunks (`JUMB`, `C2PA`, `c2pa`).
 - New AI phrases in the rulebook: "a myriad of", "a plethora of", "beacon of", "fostering a culture of", "rich tapestry", "at the forefront of" and "demystify" block; "poised to" warns.
-- Safe writes: cleaned files are written atomically (temp file plus rename), writes through symlinks are refused with a warning, and files larger than `max_file_bytes` (default 256 MiB, env `WMC_MAX_FILE_BYTES`) are skipped instead of loaded into memory.
+- Safe writes: cleaned files are written atomically (temp file plus rename), writes through symlinks are refused with a warning, and files larger than `max_file_bytes` (default 256 MiB, env `WATERMARK_CLEANER_MAX_FILE_BYTES`) are skipped instead of loaded into memory.
 - Supply chain hardening: all GitHub Actions are pinned to commit SHAs, workflows run with least-privilege permissions, plus CodeQL analysis, Dependabot updates and a pip-audit job.
-- Agent skill packaging: `skills/wmc-cleaner/SKILL.md` lets coding agents drive the CLI with an inspect-first workflow.
-- `--strict` flag: `wmc fix --strict` exits non-zero when blocking findings remain that need a human rewrite.
+- Agent skill packaging: `skills/watermark-cleaner/SKILL.md` lets coding agents drive the CLI with an inspect-first workflow.
+- `--strict` flag: `watermark-cleaner fix --strict` exits non-zero when blocking findings remain that need a human rewrite.
 - `custom_banned_phrases` and `ignore_phrases` config keys for project-specific rule tuning.
-- `.pre-commit-hooks.yaml` with `wmc-fix` and `wmc-check` hooks for the pre-commit framework.
+- `.pre-commit-hooks.yaml` with `watermark-cleaner-fix` and `watermark-cleaner-check` hooks for the pre-commit framework.
 - `--version` flag in both CLIs.
 - Cross-implementation parity test that runs the same fixtures through the Python and the Node CLI and asserts identical output.
 - CI test matrix across Python 3.9 to 3.13 and Node 18 to 22, a rules-sync check and a package install smoke test.

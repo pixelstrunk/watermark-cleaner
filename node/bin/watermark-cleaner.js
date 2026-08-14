@@ -32,7 +32,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  console.log("usage: wmc <check|fix|rewrite> [paths...]");
+  console.log("usage: watermark-cleaner <check|fix|rewrite> [paths...]");
   console.log("  check|fix  [--json] [--no-voice] [--aggressive] [--no-backup] [--quiet] [--strict] [--config <file>]");
   console.log("  rewrite    [--source-lang <auto>] [--pivot-lang EN] [--write] [--config <file>]  (opt-in, sends text to deepl)");
   console.log("  --version  print the version");
@@ -89,7 +89,7 @@ async function main() {
   const argv = process.argv.slice(2);
   const command = argv.shift();
   if (command === "--version" || command === "-V") {
-    console.log(`wmc ${require("../package.json").version}`);
+    console.log(`watermark-cleaner ${require("../package.json").version}`);
     process.exit(0);
   }
   const args = parseArgs(argv);

@@ -1,7 +1,7 @@
 const assert = require("assert");
 const path = require("path");
 
-process.env.WMC_RULES_DIR = process.env.WMC_RULES_DIR || path.join(__dirname, "..", "..", "rules");
+process.env.WATERMARK_CLEANER_RULES_DIR = process.env.WATERMARK_CLEANER_RULES_DIR || path.join(__dirname, "..", "..", "rules");
 
 const { DEFAULTS, applyAggressive } = require("../src/config");
 const { cleanText } = require("../src/core");
@@ -334,17 +334,17 @@ const { run } = require("../src/runner");
 const { DEFAULTS: RUN_DEFAULTS } = require("../src/config");
 
 ok("atomic write replaces content and leaves no temp files", () => {
-  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "wmc-"));
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
   const target = nodePath.join(tmp, "a.md");
   fs.writeFileSync(target, "old");
   writeAtomic(target, "new");
   assert.strictEqual(fs.readFileSync(target, "utf-8"), "new");
-  assert.ok(!fs.readdirSync(tmp).some((f) => f.endsWith(".wmc-tmp")));
+  assert.ok(!fs.readdirSync(tmp).some((f) => f.endsWith(".watermark-cleaner-tmp")));
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 ok("fix refuses symlinked text file", () => {
-  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "wmc-"));
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
   const real = nodePath.join(tmp, "real.md");
   fs.writeFileSync(real, "smart “quotes”");
   const link = nodePath.join(tmp, "link.md");
@@ -356,7 +356,7 @@ ok("fix refuses symlinked text file", () => {
 });
 
 ok("oversized file skipped", () => {
-  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "wmc-"));
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
   const target = nodePath.join(tmp, "big.md");
   fs.writeFileSync(target, "x".repeat(100));
   const reports = run([target], { ...RUN_DEFAULTS, max_file_bytes: 10 }, true);

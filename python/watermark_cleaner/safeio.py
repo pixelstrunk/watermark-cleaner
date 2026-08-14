@@ -8,7 +8,7 @@ DEFAULT_MAX_FILE_BYTES = 256 * 1024 * 1024
 def max_file_bytes(config=None):
     if config and config.get("max_file_bytes"):
         return int(config["max_file_bytes"])
-    env = os.environ.get("WMC_MAX_FILE_BYTES")
+    env = os.environ.get("WATERMARK_CLEANER_MAX_FILE_BYTES")
     if env:
         return int(env)
     return DEFAULT_MAX_FILE_BYTES
@@ -29,7 +29,7 @@ def write_bytes_atomic(path, data):
     target = Path(path)
     if target.is_symlink():
         raise OSError(f"refusing to write through symlink: {target}")
-    handle, temp_path = tempfile.mkstemp(prefix=target.name + ".", suffix=".wmc-tmp", dir=str(target.parent))
+    handle, temp_path = tempfile.mkstemp(prefix=target.name + ".", suffix=".watermark-cleaner-tmp", dir=str(target.parent))
     try:
         with os.fdopen(handle, "wb") as stream:
             stream.write(data)

@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wmc-cleaner"
+name = "watermark-cleaner"
 version = "0.2.0"
 description = "Remove AI text artifacts, AI phrases and file metadata before you publish. Detects and strips invisible unicode characters, losslessly cleans image metadata."
 readme = "README.md"
@@ -26,20 +26,20 @@ classifiers = [
 ]
 
 [project.scripts]
-wmc = "wmc.cli:main"
+watermark-cleaner = "watermark_cleaner.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/pixelstrunk/wmc-cleaner"
-Issues = "https://github.com/pixelstrunk/wmc-cleaner/issues"
-Changelog = "https://github.com/pixelstrunk/wmc-cleaner/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/pixelstrunk/watermark-cleaner"
+Issues = "https://github.com/pixelstrunk/watermark-cleaner/issues"
+Changelog = "https://github.com/pixelstrunk/watermark-cleaner/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
-packages = ["wmc", "wmc.layers", "wmc.rewrite"]
+packages = ["watermark_cleaner", "watermark_cleaner.layers", "watermark_cleaner.rewrite"]
 
 [tool.setuptools.package-dir]
-wmc = "python/wmc"
-"wmc.layers" = "python/wmc/layers"
-"wmc.rewrite" = "python/wmc/rewrite"
+watermark_cleaner = "python/watermark_cleaner"
+"watermark_cleaner.layers" = "python/watermark_cleaner/layers"
+"watermark_cleaner.rewrite" = "python/watermark_cleaner/rewrite"
 
 [tool.setuptools.package-data]
-wmc = ["rules_data/*.json"]
+watermark_cleaner = ["rules_data/*.json"]

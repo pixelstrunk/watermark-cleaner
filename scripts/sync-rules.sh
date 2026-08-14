@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$ROOT/rules"
-PY_DEST="$ROOT/python/wmc/rules_data"
+PY_DEST="$ROOT/python/watermark_cleaner/rules_data"
 NODE_DEST="$ROOT/node/rules_data"
 
 mkdir -p "$PY_DEST" "$NODE_DEST"

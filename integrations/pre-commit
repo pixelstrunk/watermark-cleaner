@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if ! command -v wmc >/dev/null 2>&1; then
-  echo "wmc: not installed, skipping clean (pip install wmc-cleaner)"
+if ! command -v watermark-cleaner >/dev/null 2>&1; then
+  echo "watermark-cleaner: not installed, skipping clean (pip install watermark-cleaner)"
   exit 0
 fi
 
@@ -16,11 +16,11 @@ fi
 cleaned=0
 while IFS= read -r f; do
   [ -f "$f" ] || continue
-  wmc fix "$f" --no-voice --no-backup --quiet >/dev/null
+  watermark-cleaner fix "$f" --no-voice --no-backup --quiet >/dev/null
   git add "$f"
   cleaned=$((cleaned + 1))
 done <<< "$files"
 
 if [ "$cleaned" -gt 0 ]; then
-  echo "wmc: cleaned $cleaned staged file(s)"
+  echo "watermark-cleaner: cleaned $cleaned staged file(s)"
 fi

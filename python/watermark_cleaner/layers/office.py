@@ -106,7 +106,7 @@ def _clean_zip(data, targets):
         if span is None:
             return None
         header_bytes, comp_data = span
-        crc, csize, usize = info.CRC, info.compress_size, info.file_size
+        crc, csize, usize, method = info.CRC, info.compress_size, info.file_size, info.compress_type
         modified = False
         tags = targets.get(info.filename)
         if tags:
@@ -125,14 +125,12 @@ def _clean_zip(data, targets):
                     stripped_total += n
                     modified = True
                     new_bytes = new_text.encode("utf-8")
-                    compressed = _compress(new_bytes, info.compress_type)
-                    if compressed is None:
-                        return None
-                    comp_data = compressed
+                    comp_data = new_bytes
+                    method = zipfile.ZIP_STORED
                     crc = zlib.crc32(new_bytes) & 0xFFFFFFFF
                     csize = len(comp_data)
                     usize = len(new_bytes)
-        records.append((info, header_bytes, comp_data, crc, csize, usize, modified))
+        records.append((info, header_bytes, comp_data, crc, csize, usize, method, modified))
 
     if not stripped_total:
         return data, 0
@@ -167,17 +165,11 @@ def _decompress(data, method):
     return out
 
 
-def _compress(data, method):
-    if method == zipfile.ZIP_STORED:
-        return data
-    compressor = zlib.compressobj(6, zlib.DEFLATED, -15)
-    return compressor.compress(data) + compressor.flush()
-
-
-def _patch_header(header_bytes, crc, csize, usize):
+def _patch_header(header_bytes, crc, csize, usize, method):
     header = bytearray(header_bytes)
     flags = struct.unpack("<H", header[6:8])[0] & ~_STREAMED_FLAG
     header[6:8] = struct.pack("<H", flags)
+    header[8:10] = struct.pack("<H", method)
     header[14:18] = struct.pack("<I", crc)
     header[18:22] = struct.pack("<I", csize)
     header[22:26] = struct.pack("<I", usize)
@@ -191,7 +183,7 @@ def _dos_datetime(date_time):
     return dostime, dosdate
 
 
-def _central_record(info, crc, csize, usize, local_offset):
+def _central_record(info, crc, csize, usize, method, local_offset):
     name = info.filename.encode("utf-8")
     extra = info.extra or b""
     comment = info.comment or b""
@@ -205,7 +197,7 @@ def _central_record(info, crc, csize, usize, local_offset):
             version_made_by,
             info.extract_version,
             flags,
-            info.compress_type,
+            method,
             dostime,
             dosdate,
             crc,
@@ -233,13 +225,13 @@ def _write_zip(records):
     ordered = sorted(records, key=lambda r: r[0].header_offset)
     out = bytearray()
     offsets = []
-    for info, header_bytes, comp_data, crc, csize, usize, modified in ordered:
+    for info, header_bytes, comp_data, crc, csize, usize, method, modified in ordered:
         offsets.append(len(out))
-        out += _patch_header(header_bytes, crc, csize, usize) if modified else header_bytes
+        out += _patch_header(header_bytes, crc, csize, usize, method) if modified else header_bytes
         out += comp_data
     central = bytearray()
-    for (info, header_bytes, comp_data, crc, csize, usize, modified), offset in zip(ordered, offsets):
-        central += _central_record(info, crc, csize, usize, offset)
+    for (info, header_bytes, comp_data, crc, csize, usize, method, modified), offset in zip(ordered, offsets):
+        central += _central_record(info, crc, csize, usize, method, offset)
     cd_offset = len(out)
     out += central
     out += _eocd(len(ordered), len(central), cd_offset)

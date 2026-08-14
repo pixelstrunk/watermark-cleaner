@@ -189,16 +189,12 @@ function decompressEntry(compData, method) {
   }
 }
 
-function compressEntry(data, method) {
-  if (method === ZIP_STORED) return data;
-  return zlib.deflateRawSync(data);
-}
-
-function patchHeader(header, crc, csize, usize) {
+function patchHeader(header, crc, csize, usize, method) {
   const patched = Buffer.from(header);
   let flags = patched.readUInt16LE(6);
   flags &= ~STREAMED_FLAG;
   patched.writeUInt16LE(flags, 6);
+  patched.writeUInt16LE(method, 8);
   patched.writeUInt32LE(crc, 14);
   patched.writeUInt32LE(csize, 18);
   patched.writeUInt32LE(usize, 22);
@@ -240,6 +236,7 @@ function cleanZip(data, targets) {
     let crc = entry.crc;
     let csize = entry.csize;
     let usize = entry.usize;
+    let method = entry.method;
     let modified = false;
     const tags = targets[entry.filename];
     if (tags) {
@@ -258,21 +255,22 @@ function cleanZip(data, targets) {
           strippedTotal += count;
           modified = true;
           const newBytes = Buffer.from(newText, "utf-8");
-          compData = compressEntry(newBytes, entry.method);
+          compData = newBytes;
+          method = ZIP_STORED;
           crc = crc32(newBytes);
           csize = compData.length;
           usize = newBytes.length;
         }
       }
     }
-    records.push({ entry, header: span.header, compData, crc, csize, usize, modified });
+    records.push({ entry, header: span.header, compData, crc, csize, usize, method, modified });
   }
 
   if (!strippedTotal) return { data, stripped: 0 };
   return { data: writeZip(records), stripped: strippedTotal };
 }
 
-function centralRecord(entry, crc, csize, usize, localOffset) {
+function centralRecord(entry, crc, csize, usize, method, localOffset) {
   const name = Buffer.from(entry.filename, "utf-8");
   const flags = entry.flags & ~STREAMED_FLAG;
   const header = Buffer.alloc(46);
@@ -280,7 +278,7 @@ function centralRecord(entry, crc, csize, usize, localOffset) {
   header.writeUInt16LE(entry.versionMadeBy, 4);
   header.writeUInt16LE(entry.versionNeeded, 6);
   header.writeUInt16LE(flags, 8);
-  header.writeUInt16LE(entry.method, 10);
+  header.writeUInt16LE(method, 10);
   header.writeUInt16LE(entry.modTime, 12);
   header.writeUInt16LE(entry.modDate, 14);
   header.writeUInt32LE(crc, 16);
@@ -316,12 +314,14 @@ function writeZip(records) {
   let pos = 0;
   for (const record of ordered) {
     offsets.push(pos);
-    const header = record.modified ? patchHeader(record.header, record.crc, record.csize, record.usize) : record.header;
+    const header = record.modified
+      ? patchHeader(record.header, record.crc, record.csize, record.usize, record.method)
+      : record.header;
     localParts.push(header, record.compData);
     pos += header.length + record.compData.length;
   }
   const centralParts = ordered.map((record, i) =>
-    centralRecord(record.entry, record.crc, record.csize, record.usize, offsets[i])
+    centralRecord(record.entry, record.crc, record.csize, record.usize, record.method, offsets[i])
   );
   const central = Buffer.concat(centralParts);
   const cdOffset = pos;

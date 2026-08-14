@@ -3,8 +3,8 @@
 Remove AI text artifacts, hidden unicode characters and file metadata before you publish.
 
 [![ci](https://github.com/pixelstrunk/watermark-cleaner/actions/workflows/ci.yml/badge.svg)](https://github.com/pixelstrunk/watermark-cleaner/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/watermark-cleaner)](https://pypi.org/project/watermark-cleaner/)
-[![npm](https://img.shields.io/npm/v/watermark-cleaner)](https://www.npmjs.com/package/watermark-cleaner)
+[![PyPI](https://img.shields.io/pypi/v/watermark-cleaner?cacheSeconds=3600)](https://pypi.org/project/watermark-cleaner/)
+[![npm](https://img.shields.io/npm/v/watermark-cleaner?cacheSeconds=3600)](https://www.npmjs.com/package/watermark-cleaner)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Watermark Cleaner is a deterministic, offline, zero-dependency tool for content you own. It cleans the mechanical traces that mark text as machine generated, flags the stylistic phrases that read as AI writing, and strips identifying metadata from images without touching a single pixel. It ships as a Python CLI and a Node CLI that share one rule set and are tested to behave identically.

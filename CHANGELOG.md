@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-08-14
+
+### Changed
+
+- Project renamed from `wmc-cleaner` to `watermark-cleaner` (package, CLI command, config filename, repository). No behavior change.
+
 ## [0.2.0] - 2026-08-13
 
 ### Changed

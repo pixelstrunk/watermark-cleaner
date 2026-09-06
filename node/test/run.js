@@ -188,7 +188,7 @@ ok("nbsp between non-ascii digits replaced", () => {
   assert.strictEqual(clean("١٢ ٣٤٥").text, "١٢ ٣٤٥");
 });
 
-const { stripJpeg, stripPng, stripWebp } = require("../src/metadata");
+const { stripJpeg, stripPng, stripWebp, cleanFile: cleanImageFile, inspectFile: inspectImageFile } = require("../src/metadata");
 
 function jpegSegment(marker, payload) {
   const head = Buffer.from([0xff, marker, 0, 0]);
@@ -643,6 +643,258 @@ ok("encrypted zip entry is refused, file untouched", () => {
   assert.ok(report.findings.some((f) => f.message.includes("could not parse")));
   assert.ok(fs.readFileSync(target).equals(buffer));
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("cli flushes a large json report through a pipe before exiting", () => {
+  const { spawnSync } = require("child_process");
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const line = "Let’s dive in — “quote” a plethora of things, in today’s fast-paced world.\n";
+  for (let i = 0; i < 300; i += 1) fs.writeFileSync(nodePath.join(tmp, `f${i}.md`), line);
+  const bin = nodePath.join(__dirname, "..", "bin", "watermark-cleaner.js");
+  const result = spawnSync(process.execPath, [bin, "check", tmp, "--json"], { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+  fs.rmSync(tmp, { recursive: true, force: true });
+  assert.strictEqual(result.status, 1);
+  assert.ok(result.stdout.length > 65536, `expected more than one pipe buffer of output, got ${result.stdout.length}`);
+  const payload = JSON.parse(result.stdout);
+  assert.strictEqual(payload.reports.length, 300);
+});
+
+ok("fix_dashes disabled keeps every dash", () => {
+  const text = "fast — slow, 1990–1995, a‒b, c―d";
+  const result = clean(text, { fix_dashes: false });
+  assert.strictEqual(result.text, text);
+  assert.deepStrictEqual(result.report.findings, []);
+});
+
+ok("fix_dashes enabled still replaces every dash", () => {
+  assert.strictEqual(clean("fast — slow, 1990–1995, a‒b, c―d").text, "fast, slow, 1990-1995, a-b, c-d");
+});
+
+ok("pure cyrillic and greek text is not a homoglyph finding", () => {
+  for (const text of ["Привет, это обычный русский текст.", "Αθήνα και Βόρεια Ελλάδα"]) {
+    const result = clean(text, { replace_homoglyphs: true });
+    assert.strictEqual(result.text, text);
+    assert.deepStrictEqual(result.report.findings, []);
+  }
+});
+
+ok("mixed-script word is flagged and replaced", () => {
+  const result = clean("log in at pаypal now", { replace_homoglyphs: true });
+  assert.strictEqual(result.text, "log in at paypal now");
+  assert.strictEqual(result.report.findings[0].count, 1);
+});
+
+ok("all-confusable word in a latin document is flagged", () => {
+  const result = clean("Visit СОРЕ today", { replace_homoglyphs: true });
+  assert.strictEqual(result.text, "Visit COPE today");
+  assert.strictEqual(result.report.findings[0].count, 4);
+});
+
+ok("all-confusable word next to genuine cyrillic is kept", () => {
+  const text = "Слово а значит and";
+  const result = clean(text, { replace_homoglyphs: true });
+  assert.strictEqual(result.text, text);
+  assert.deepStrictEqual(result.report.findings, []);
+});
+
+ok("mixed word inside a cyrillic document is still flagged", () => {
+  const result = clean("Привет, log in at pаypal", { replace_homoglyphs: true });
+  assert.strictEqual(result.text, "Привет, log in at paypal");
+  assert.strictEqual(result.report.findings[0].count, 1);
+});
+
+ok("every sentence shape matches its own example", () => {
+  const { loadRules } = require("../src/rules");
+  for (const shape of loadRules().phrases.sentence_shapes) {
+    const ids = clean(shape.example).report.findings.filter((f) => f.kind === "sentence-shape").flatMap((f) => f.examples);
+    assert.ok(ids.includes(shape.id), `${shape.id} misses its example`);
+  }
+});
+
+ok("period-separated sentence shapes block", () => {
+  for (const text of [
+    "Agile is dead. Flow is the future.",
+    "Stop thinking features. Start thinking jobs.",
+    "The question isn't how. The question is why.",
+    "You don't need more tools. You need focus.",
+  ]) {
+    assert.strictEqual(clean(text).report.has_errors, true, text);
+  }
+});
+
+ok("unrelated sentences do not trigger a shape", () => {
+  assert.strictEqual(clean("Agile is dead. We moved on. Years later, nobody asked what is the future.").report.has_errors, false);
+});
+
+ok("docx blanks authors in tracked changes, comments and people list", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "tracked.docx");
+  fs.writeFileSync(target, buildZip([
+    { name: "[Content_Types].xml", content: "<Types/>" },
+    { name: "word/document.xml", content: '<w:document xmlns:w="w"><w:body><w:p><w:ins w:id="1" w:author="Carol Reviewer" w:date="2026-01-01T00:00:00Z"><w:r><w:t>Hello</w:t></w:r></w:ins><w:del w:id="2" w:author="Carol Reviewer" w:date="2026-01-01T00:00:00Z"><w:r><w:delText>Bye</w:delText></w:r></w:del></w:p></w:body></w:document>' },
+    { name: "word/comments.xml", content: '<w:comments xmlns:w="w"><w:comment w:id="0" w:author="Dave Editor" w:initials="DE" w:date="2026-01-01T00:00:00Z"><w:p><w:r><w:t>Looks good</w:t></w:r></w:p></w:comment></w:comments>' },
+    { name: "word/people.xml", content: '<w15:people xmlns:w15="w15"><w15:person w15:author="Dave Editor"><w15:presenceInfo w15:providerId="Windows Live" w15:userId="dave@example.com"/></w15:person></w15:people>' },
+    { name: "word/media/image1.xml", content: '<x author="not a word part"/>' },
+    { name: "docProps/core.xml", content: "<cp:coreProperties/>" },
+    { name: "docProps/app.xml", content: '<Properties xmlns="app"><Application>Microsoft Office Word</Application><AppVersion>16.0000</AppVersion><Template>Acme_Letterhead.dotm</Template><TotalTime>1342</TotalTime><Pages>3</Pages></Properties>' },
+  ]));
+  const report = office.cleanFile(target, true, false);
+  assert.strictEqual(report.changed, true);
+  assert.strictEqual(report.counts.fixed, 2 + 2 + 1 + 4);
+  const { entries } = readZipEntries(fs.readFileSync(target));
+  for (const name of ["word/document.xml", "word/comments.xml", "word/people.xml"]) {
+    assert.ok(!entries[name].content.includes("Carol"), name);
+    assert.ok(!entries[name].content.includes("Dave"), name);
+  }
+  assert.ok(entries["word/document.xml"].content.includes('w:author=""'));
+  assert.ok(entries["word/document.xml"].content.includes("<w:t>Hello</w:t>"));
+  assert.ok(entries["word/comments.xml"].content.includes('w:initials=""'));
+  assert.ok(entries["word/comments.xml"].content.includes("Looks good"));
+  assert.strictEqual(entries["word/people.xml"].content, '<w15:people xmlns:w15="w15"></w15:people>');
+  assert.ok(!entries["docProps/app.xml"].content.includes("Acme_Letterhead"));
+  assert.ok(!entries["docProps/app.xml"].content.includes("TotalTime"));
+  assert.ok(entries["docProps/app.xml"].content.includes("<Pages>3</Pages>"));
+  assert.strictEqual(entries["word/media/image1.xml"].content, '<x author="not a word part"/>');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("odt empties creators in annotations and tracked changes", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "annotated.odt");
+  const content = '<office:document-content xmlns:office="office" xmlns:dc="dc" xmlns:text="text"><office:body><office:annotation><dc:creator>Jane Doe</dc:creator><dc:date>2026-01-01</dc:date><text:p>Check this</text:p></office:annotation><text:tracked-changes><text:changed-region><text:insertion><office:change-info><dc:creator>Jane Doe</dc:creator><dc:date>2026-01-01</dc:date></office:change-info></text:insertion></text:changed-region></text:tracked-changes>Hello world</office:body></office:document-content>';
+  const meta = '<office:document-meta xmlns:office="office" xmlns:dc="dc" xmlns:meta="meta"><office:meta><meta:generator>SomeWordProcessor/1.0</meta:generator><dc:creator>Jane Doe</dc:creator><meta:editing-duration>PT2H14M</meta:editing-duration><meta:printed-by>Jane Doe</meta:printed-by><meta:editing-cycles>12</meta:editing-cycles></office:meta></office:document-meta>';
+  fs.writeFileSync(target, makeOdt(meta, content));
+  const report = office.cleanFile(target, true, false);
+  assert.strictEqual(report.changed, true);
+  assert.strictEqual(report.counts.fixed, 2 + 4);
+  const { entries } = readZipEntries(fs.readFileSync(target));
+  assert.ok(!entries["content.xml"].content.includes("Jane Doe"));
+  assert.strictEqual(entries["content.xml"].content.split("<dc:creator></dc:creator>").length - 1, 2);
+  assert.ok(entries["content.xml"].content.includes("<text:p>Check this</text:p>"));
+  assert.ok(!entries["meta.xml"].content.includes("editing-duration"));
+  assert.ok(entries["meta.xml"].content.includes("<meta:editing-cycles>12</meta:editing-cycles>"));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("nbsp next to digits, units, ordinals and abbreviations is kept", () => {
+  for (const text of ["10\u00a0%", "5\u00a0kg", "\u00a7\u00a05", "20\u00a0Euro", "Nr.\u00a05", "Kapitel\u00a03", "am 5.\u00a0Mai", "z.\u00a0B. so", "i.\u00a0d.\u00a0R. oft", "o.\u00a0\u00c4. auch"]) {
+    assert.strictEqual(clean(text).text, text, JSON.stringify(text));
+  }
+});
+
+ok("nbsp between words and sentences is replaced", () => {
+  assert.strictEqual(clean("Hallo\u00a0Welt").text, "Hallo Welt");
+  assert.strictEqual(clean("Ende.\u00a0Neuer Satz.").text, "Ende. Neuer Satz.");
+  assert.strictEqual(clean("Dr.\u00a0M\u00fcller").text, "Dr. M\u00fcller");
+  assert.strictEqual(clean("10\u00a0% z.\u00a0B.", { keep_nbsp_in_numbers: false }).text, "10 % z. B.");
+});
+
+ok("utf-8 svg loses comments and metadata but keeps text and line endings", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "logo.svg");
+  fs.writeFileSync(target, '<?xml version="1.0" encoding="UTF-8"?>\r\n<!-- Generator: Adobe Illustrator -->\r\n<svg xmlns="http://www.w3.org/2000/svg"><metadata><rdf:RDF>secret</rdf:RDF></metadata><title>Caf\u00e9 M\u00fcnchen</title></svg>\r\n');
+  const report = cleanImageFile(target, true, false, false);
+  assert.strictEqual(report.changed, true);
+  const result = fs.readFileSync(target, "utf-8");
+  assert.ok(!result.includes("Illustrator"));
+  assert.ok(!result.includes("secret"));
+  assert.ok(result.includes("Caf\u00e9 M\u00fcnchen"));
+  assert.ok(result.includes("\r\n"));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("non utf-8 svg is skipped with a warning in check and fix", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "old.svg");
+  const latin1 = Buffer.from('<?xml version="1.0" encoding="ISO-8859-1"?>\n<!-- Generator: Adobe Illustrator -->\n<svg><title>Caf\xe9 M\xfcnchen</title></svg>\n', "latin1");
+  fs.writeFileSync(target, latin1);
+  for (const report of [inspectImageFile(target, false), cleanImageFile(target, true, false, false)]) {
+    assert.strictEqual(report.changed, false);
+    assert.deepStrictEqual(report.findings.map((f) => f.message), ["skipped (not utf-8 text)"]);
+    assert.strictEqual(report.counts.warn, 1);
+  }
+  assert.ok(fs.readFileSync(target).equals(latin1));
+  assert.ok(!fs.existsSync(`${target}.bak`));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+const { run: runAll, collectFiles } = require("../src/runner");
+const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
+ok("read-only directory is reported and the run continues", () => {
+  if (isRoot) return;
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const locked = nodePath.join(tmp, "locked");
+  fs.mkdirSync(locked);
+  fs.writeFileSync(nodePath.join(locked, "a.md"), "smart \u201cquotes\u201d");
+  const free = nodePath.join(tmp, "free.md");
+  fs.writeFileSync(free, "smart \u201cquotes\u201d");
+  fs.chmodSync(locked, 0o555);
+  let reports;
+  try {
+    reports = runAll([tmp], { ...DEFAULTS, backup: false }, true);
+  } finally {
+    fs.chmodSync(locked, 0o755);
+  }
+  const byPath = Object.fromEntries(reports.map((r) => [r.path, r]));
+  assert.strictEqual(byPath[free].changed, true);
+  assert.strictEqual(fs.readFileSync(free, "utf-8"), 'smart "quotes"');
+  const lockedReport = byPath[nodePath.join(locked, "a.md")];
+  assert.strictEqual(lockedReport.changed, false);
+  assert.ok(lockedReport.findings.some((f) => f.message === "skipped (permission denied)"));
+  assert.strictEqual(fs.readFileSync(nodePath.join(locked, "a.md"), "utf-8"), "smart \u201cquotes\u201d");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("unreadable directory is reported as a warning", () => {
+  if (isRoot) return;
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const hidden = nodePath.join(tmp, "hidden");
+  fs.mkdirSync(hidden);
+  fs.writeFileSync(nodePath.join(hidden, "a.md"), "x");
+  fs.writeFileSync(nodePath.join(tmp, "b.md"), "x");
+  fs.chmodSync(hidden, 0o000);
+  let reports;
+  try {
+    reports = runAll([tmp], { ...DEFAULTS }, false);
+  } finally {
+    fs.chmodSync(hidden, 0o755);
+  }
+  const messages = Object.fromEntries(reports.map((r) => [r.path, r.findings.map((f) => f.message)]));
+  assert.deepStrictEqual(messages[hidden], ["skipped (permission denied)"]);
+  assert.ok(nodePath.join(tmp, "b.md") in messages);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("symlink to a directory as argument is scanned, inside the tree it is not followed", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const real = nodePath.join(tmp, "real");
+  fs.mkdirSync(real);
+  fs.writeFileSync(nodePath.join(real, "a.md"), "x");
+  const link = nodePath.join(tmp, "link");
+  fs.symlinkSync(real, link, "dir");
+  const viaLink = collectFiles([link], { ...DEFAULTS });
+  assert.deepStrictEqual(viaLink.textFiles.map((f) => nodePath.basename(f)), ["a.md"]);
+  assert.deepStrictEqual(viaLink.missing, []);
+  const whole = collectFiles([tmp], { ...DEFAULTS });
+  assert.deepStrictEqual(whole.textFiles, [nodePath.join(real, "a.md")]);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("zwj between latin letters is removed, emoji and indic sequences keep it", () => {
+  const result = clean("wa\u200dter\u200dmark");
+  assert.strictEqual(result.text, "watermark");
+  assert.strictEqual(result.report.findings[0].count, 2);
+  for (const text of ["\u{1f468}\u200d\u{1f469}\u200d\u{1f467}", "\u2764\ufe0f\u200d\u{1f525}", "\u0915\u094d\u200d\u0937"]) {
+    assert.strictEqual(clean(text).text, text);
+  }
+});
+
+ok("deprecated format, annotation and filler characters are removed, separators become spaces", () => {
+  assert.strictEqual(clean("a\u206ab\u206fc\ufff9d\ufffae\ufffbf\u3164g\uffa0h").text, "abcdefgh");
+  assert.strictEqual(clean("one\u2028two\u2029three\u2800four").text, "one two three four");
+  assert.strictEqual(clean("a\u180bb").text, "a\u180bb");
+  assert.strictEqual(clean("a\u180bb", { strip_variation_selectors: true }).text, "ab");
 });
 
 if (failed) {

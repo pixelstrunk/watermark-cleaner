@@ -66,18 +66,20 @@ Markdown structure is protected: typography and voice rules never touch fenced c
 | Zero width space, word joiner, BOM | U+200B, U+2060, U+FEFF | removed |
 | Soft hyphen, mongolian vowel separator, combining grapheme joiner | U+00AD, U+180E, U+034F | removed |
 | Invisible math operators | U+2061 to U+2064 | removed |
+| Deprecated format controls, interlinear annotation characters, hangul fillers | U+206A to U+206F, U+FFF9 to U+FFFB, U+3164, U+FFA0 | removed |
 | Unicode tag characters (hidden payloads) | U+E0000 to U+E007F | removed |
-| Exotic spaces (nbsp, thin space, ideographic space and friends) | U+00A0, U+2000 to U+200A, U+202F, U+205F, U+3000 | replaced with a normal space |
+| Exotic spaces and blanks (nbsp, thin space, ideographic space, line and paragraph separator, braille blank) | U+00A0, U+2000 to U+200A, U+202F, U+205F, U+3000, U+2028, U+2029, U+2800 | replaced with a normal space |
 | Smart quotes, ellipsis, bullets, dashes | U+2018 and friends | normalized to ascii |
-| Homoglyphs (cyrillic і in latin text and friends) | per rulebook | warned, replaced only with `--aggressive` |
+| Homoglyphs (cyrillic і inside a latin word and friends) | per rulebook | warned, replaced only with `--aggressive` |
 
 Deliberately preserved, because removing them breaks legitimate text:
 
-- Zero width joiner (U+200D) in emoji sequences.
+- Zero width joiner (U+200D) next to an emoji or inside a script that requires it (Indic scripts, Arabic). Between latin letters it is a watermark and gets removed.
 - Zero width non-joiner (U+200C) when adjacent to a script that requires it (Persian, Arabic, Indic scripts and others). Between latin letters it is a watermark and gets removed.
 - Bidi marks and bidi controls in documents that contain right-to-left text. In pure left-to-right documents they are removed, which is the [Trojan Source](https://trojansource.codes/) defense.
-- Non breaking spaces between digits (`12 000` keeps its formatting) unless you disable `keep_nbsp_in_numbers`.
-- Variation selectors, unless you pass `--aggressive`.
+- Non breaking spaces next to a digit (`12 000`, `10 %`, `5 kg`, `§ 5`, `Nr. 5`), after an ordinal (`5. Mai`) and inside spaced abbreviations (`z. B.`, `d. h.`, `i. d. R.`). Everywhere else, between two words or between two sentences, a non breaking space is a watermark and becomes a normal space. Disable the guard with `keep_nbsp_in_numbers: false`.
+- Variation selectors, including the Mongolian ones (U+180B to U+180D), unless you pass `--aggressive`.
+- Genuine Cyrillic and Greek text. Homoglyph detection works per word: a word that mixes latin letters with look-alike letters is flagged, a word written entirely in Cyrillic or Greek is normal text and stays untouched even with `--aggressive`. A word that consists only of look-alike letters (`СОРЕ` spelled in Cyrillic) is flagged only when the document contains no other Cyrillic or Greek text.
 
 ## Coverage
 
@@ -96,11 +98,11 @@ Deliberately preserved, because removing them breaks legitimate text:
 
 ## Image metadata, losslessly
 
-`watermark-cleaner fix` strips EXIF, XMP, C2PA and comment segments from JPEG, PNG and WebP at the container level. Pixels are never re-encoded, so there is no quality loss and the operation is verifiable with a byte diff. ICC color profiles are kept by default, because removing them visibly shifts colors in the browser; strip them too with `"strip_icc": true` or `--aggressive`. SVG metadata, XMP blocks and XML comments are removed as text. GIF and TIFF are never modified; the tool tells you it cannot strip them losslessly and leaves them alone. Files that fail to parse are left untouched.
+`watermark-cleaner fix` strips EXIF, XMP, C2PA and comment segments from JPEG, PNG and WebP at the container level. Pixels are never re-encoded, so there is no quality loss and the operation is verifiable with a byte diff. ICC color profiles are kept by default, because removing them visibly shifts colors in the browser; strip them too with `"strip_icc": true` or `--aggressive`. SVG metadata, XMP blocks and XML comments are removed as text; an SVG that is not valid UTF-8 (older Illustrator exports in ISO-8859-1, for example) is skipped with a warning instead of being re-encoded. GIF and TIFF are never modified; the tool tells you it cannot strip them losslessly and leaves them alone. Files that fail to parse are left untouched.
 
 ## Document metadata, losslessly
 
-DOCX and ODT are ZIP containers. `watermark-cleaner fix` strips the author, last-editor and creating-application fields from the small metadata part inside them (`docProps/core.xml` and `docProps/app.xml` for DOCX, `meta.xml` for ODT) and rewrites the archive with every other part, including the document body, styles and embedded images, copied through byte-for-byte, verifiable with a byte diff exactly like the image path. Title, subject, keywords and description are left alone; those are content you likely want, not a machine fingerprint. Files that fail to parse as a well-formed ZIP are left untouched. PDF is not supported yet.
+DOCX and ODT are ZIP containers. `watermark-cleaner fix` removes the people and the software from them, container-level and lossless. For DOCX that means the author and last-editor fields in `docProps/core.xml`, the application name, application version, template name and total editing time in `docProps/app.xml`, the hidden people list in `word/people.xml`, and the author names and initials on every comment and tracked change in the document body, headers, footers and notes. Comments and tracked changes themselves stay in place, only the name on them is blanked. For ODT it means creator, initial creator, generator, editing duration and printed-by in `meta.xml` plus the creator on every annotation and tracked change in `content.xml`. Every part that carries no such field, including styles and embedded images, is copied through byte-for-byte, verifiable with a byte diff exactly like the image path. Rewritten parts are stored uncompressed so both CLIs produce identical bytes; a document with heavy tracked changes can therefore grow by a few hundred kilobytes. Title, subject, keywords, description and edit dates are left alone; those are content you likely want, not a machine fingerprint. Files that fail to parse as a well-formed ZIP are left untouched. PDF is not supported yet.
 
 ## Use as a publish gate
 
@@ -118,7 +120,7 @@ repos:
 
 Coding agents can drive the CLI through the skill in [`skills/watermark-cleaner/`](skills/watermark-cleaner/), which enforces an inspect-first workflow.
 
-All writes are safe by construction: files are replaced atomically, writes through symlinks are refused, and files larger than `max_file_bytes` (default 256 MiB) are skipped instead of loaded into memory.
+All writes are safe by construction: files are replaced atomically, writes through symlinks are refused, and files larger than `max_file_bytes` (default 256 MiB) are skipped instead of loaded into memory. A file or folder the tool is not allowed to read or write is reported as a warning and skipped; the run continues with the next file instead of aborting.
 
 ## The voice layer, honestly
 

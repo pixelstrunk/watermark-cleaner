@@ -52,7 +52,7 @@ class ExcludeScoping(unittest.TestCase):
             base = Path(tmp) / "build" / "docs"
             base.mkdir(parents=True)
             (base / "a.md").write_text("hello", encoding="utf-8")
-            text_files, _, _, _ = collect_files([str(base)], dict(DEFAULTS))
+            text_files, _, _, _, _ = collect_files([str(base)], dict(DEFAULTS))
             self.assertEqual(len(text_files), 1)
 
     def test_excluded_name_below_base_is_still_excluded(self):
@@ -61,14 +61,14 @@ class ExcludeScoping(unittest.TestCase):
             (base / "dist").mkdir(parents=True)
             (base / "dist" / "a.md").write_text("hello", encoding="utf-8")
             (base / "b.md").write_text("hello", encoding="utf-8")
-            text_files, _, _, _ = collect_files([str(base)], dict(DEFAULTS))
+            text_files, _, _, _, _ = collect_files([str(base)], dict(DEFAULTS))
             self.assertEqual([f.name for f in text_files], ["b.md"])
 
     def test_duplicate_paths_deduplicated(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "a.md"
             target.write_text("hello", encoding="utf-8")
-            text_files, _, _, _ = collect_files([str(target), str(target)], dict(DEFAULTS))
+            text_files, _, _, _, _ = collect_files([str(target), str(target)], dict(DEFAULTS))
             self.assertEqual(len(text_files), 1)
 
 
@@ -145,6 +145,16 @@ class DashPolicy(unittest.TestCase):
     def test_empty_spaced_replacement_honored(self):
         cleaned, _ = clean("fast — slow", dash_policy={"spaced_replacement": ""})
         self.assertEqual(cleaned, "fastslow")
+
+    def test_fix_dashes_disabled_keeps_every_dash(self):
+        text = "fast — slow, 1990–1995, a‒b, c―d"
+        cleaned, report = clean(text, fix_dashes=False)
+        self.assertEqual(cleaned, text)
+        self.assertEqual(report.findings, [])
+
+    def test_fix_dashes_enabled_still_replaces_every_dash(self):
+        cleaned, _ = clean("fast — slow, 1990–1995, a‒b, c―d")
+        self.assertEqual(cleaned, "fast, slow, 1990-1995, a-b, c-d")
 
 
 if __name__ == "__main__":

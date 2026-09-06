@@ -9,26 +9,34 @@ const { tooLarge, isSymlink, writeAtomic } = require("./safeio");
 
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
-function walk(target, exclude, acc) {
-  const stat = fs.lstatSync(target);
-  if (stat.isSymbolicLink()) {
-    let real;
-    try {
-      real = fs.statSync(target);
-    } catch (error) {
-      return;
+const PERMISSION_MESSAGE = "skipped (permission denied)";
+const IO_MESSAGE = "skipped (i/o error)";
+
+function byUtf8Bytes(a, b) {
+  return Buffer.compare(Buffer.from(a.name, "utf-8"), Buffer.from(b.name, "utf-8"));
+}
+
+function walk(directory, exclude, acc, unreadable) {
+  let entries;
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    unreadable.push(directory);
+    return;
+  }
+  entries.sort(byUtf8Bytes);
+  for (const entry of entries) {
+    if (exclude.includes(entry.name)) continue;
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      walk(full, exclude, acc, unreadable);
+    } else if (entry.isFile()) {
+      acc.push(full);
+    } else if (entry.isSymbolicLink()) {
+      try {
+        if (fs.statSync(full).isFile()) acc.push(full);
+      } catch (error) {}
     }
-    if (real.isFile()) acc.push(target);
-    return;
-  }
-  if (stat.isFile()) {
-    acc.push(target);
-    return;
-  }
-  if (!stat.isDirectory()) return;
-  for (const entry of fs.readdirSync(target)) {
-    if (exclude.includes(entry)) continue;
-    walk(path.join(target, entry), exclude, acc);
   }
 }
 
@@ -39,12 +47,19 @@ function collectFiles(paths, config) {
   const exclude = config.exclude || [];
   const all = [];
   const missing = [];
+  const unreadable = [];
   for (const p of paths) {
-    if (!fs.existsSync(p)) {
-      missing.push(p);
+    let stat;
+    try {
+      stat = fs.statSync(p);
+    } catch (error) {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") missing.push(p);
+      else unreadable.push(p);
       continue;
     }
-    walk(p, exclude, all);
+    if (stat.isFile()) all.push(p);
+    else if (stat.isDirectory()) walk(p, exclude, all, unreadable);
+    else missing.push(p);
   }
   const textFiles = [];
   const imageFiles = [];
@@ -64,7 +79,7 @@ function collectFiles(paths, config) {
     else if (imageExt.has(ext)) imageFiles.push(file);
     else if (documentExt.has(ext)) documentFiles.push(file);
   }
-  return { textFiles, imageFiles, documentFiles, missing };
+  return { textFiles, imageFiles, documentFiles, missing, unreadable };
 }
 
 function skipReport(file, message) {
@@ -77,13 +92,24 @@ function skipReport(file, message) {
   };
 }
 
+function safely(file, action) {
+  try {
+    return action();
+  } catch (error) {
+    if (error && (error.code === "EACCES" || error.code === "EPERM")) return skipReport(file, PERMISSION_MESSAGE);
+    if (error && typeof error.code === "string") return skipReport(file, IO_MESSAGE);
+    throw error;
+  }
+}
+
 function processTextFile(file, config, rules, write) {
   if (tooLarge(file, config)) {
     return skipReport(file, "skipped (larger than max_file_bytes)");
   }
+  const raw = fs.readFileSync(file);
   let original;
   try {
-    original = utf8Decoder.decode(fs.readFileSync(file));
+    original = utf8Decoder.decode(raw);
   } catch (error) {
     return skipReport(file, "skipped (not utf-8 text)");
   }
@@ -108,10 +134,11 @@ function backup(file) {
 
 function run(paths, config, write) {
   const rules = loadRules();
-  const { textFiles, imageFiles, documentFiles, missing } = collectFiles(paths, config);
+  const { textFiles, imageFiles, documentFiles, missing, unreadable } = collectFiles(paths, config);
   const reports = [];
   for (const p of missing) reports.push(skipReport(p, "path not found"));
-  for (const file of textFiles) reports.push(processTextFile(file, config, rules, write));
+  for (const p of unreadable) reports.push(skipReport(p, PERMISSION_MESSAGE));
+  for (const file of textFiles) reports.push(safely(file, () => processTextFile(file, config, rules, write)));
   const doBackup = config.backup !== false;
   const stripIcc = config.strip_icc === true;
   for (const file of imageFiles) {
@@ -119,18 +146,18 @@ function run(paths, config, write) {
       reports.push(skipReport(file, "skipped (larger than max_file_bytes)"));
       continue;
     }
-    if (write) reports.push(metadata.cleanFile(file, true, doBackup, stripIcc));
-    else reports.push(metadata.inspectFile(file, stripIcc));
+    if (write) reports.push(safely(file, () => metadata.cleanFile(file, true, doBackup, stripIcc)));
+    else reports.push(safely(file, () => metadata.inspectFile(file, stripIcc)));
   }
   for (const file of documentFiles) {
     if (tooLarge(file, config)) {
       reports.push(skipReport(file, "skipped (larger than max_file_bytes)"));
       continue;
     }
-    if (write) reports.push(office.cleanFile(file, true, doBackup));
-    else reports.push(office.inspectFile(file));
+    if (write) reports.push(safely(file, () => office.cleanFile(file, true, doBackup)));
+    else reports.push(safely(file, () => office.inspectFile(file)));
   }
   return reports;
 }
 
-module.exports = { run };
+module.exports = { run, collectFiles };

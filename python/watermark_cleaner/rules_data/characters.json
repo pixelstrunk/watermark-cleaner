@@ -10,10 +10,14 @@
     { "cp": "2061", "name": "function application" },
     { "cp": "2062", "name": "invisible times" },
     { "cp": "2063", "name": "invisible separator" },
-    { "cp": "2064", "name": "invisible plus" }
+    { "cp": "2064", "name": "invisible plus" },
+    { "cp": "3164", "name": "hangul filler" },
+    { "cp": "FFA0", "name": "halfwidth hangul filler" }
   ],
   "remove_ranges": [
-    { "from": "E0000", "to": "E007F", "name": "unicode tag characters (hidden payload)" }
+    { "from": "E0000", "to": "E007F", "name": "unicode tag characters (hidden payload)" },
+    { "from": "206A", "to": "206F", "name": "deprecated format characters (shaping and digit controls)" },
+    { "from": "FFF9", "to": "FFFB", "name": "interlinear annotation characters" }
   ],
   "zwnj": {
     "cp": "200C",
@@ -54,11 +58,26 @@
     "to": "FE0F",
     "supplementary_from": "E0100",
     "supplementary_to": "E01EF",
-    "strip_when_aggressive": true
+    "strip_when_aggressive": true,
+    "mongolian_from": "180B",
+    "mongolian_to": "180D"
   },
   "exotic_spaces_to_ascii": [
     "00A0", "1680", "2000", "2001", "2002", "2003", "2004", "2005",
-    "2006", "2007", "2008", "2009", "200A", "202F", "205F", "3000"
+    "2006", "2007", "2008", "2009", "200A", "202F", "205F", "3000",
+    "2028", "2029", "2800"
   ],
-  "number_space_guard": ["00A0", "202F", "2009", "2007"]
+  "number_space_guard": ["00A0", "202F", "2009", "2007"],
+  "zwj": {
+    "cp": "200D",
+    "name": "zero width joiner",
+    "policy": "remove unless adjacent to an emoji or a script that requires it"
+  },
+  "emoji_ranges": [
+    { "from": "2300", "to": "23FF", "name": "miscellaneous technical" },
+    { "from": "2600", "to": "27BF", "name": "miscellaneous symbols and dingbats" },
+    { "from": "2B00", "to": "2BFF", "name": "miscellaneous symbols and arrows" },
+    { "from": "FE0F", "to": "FE0F", "name": "emoji presentation selector" },
+    { "from": "1F000", "to": "1FAFF", "name": "emoji blocks" }
+  ]
 }

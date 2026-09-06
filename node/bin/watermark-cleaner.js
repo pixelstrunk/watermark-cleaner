@@ -67,14 +67,14 @@ function runScan(command, args) {
   }
 
   const blocking = reports.some((r) => r.has_errors);
-  process.exit(blocking && (!write || args.flags.strict) ? 1 : 0);
+  return blocking && (!write || args.flags.strict) ? 1 : 0;
 }
 
 async function runRewrite(args) {
   const { rewriteFile } = require("../src/rewrite/deepl");
   if (!args.paths.length) {
     usage();
-    process.exit(1);
+    return 1;
   }
   const config = loadConfig(args.flags.config, args.paths[0]);
   const sourceLang = args.flags["source-lang"] || null;
@@ -90,7 +90,11 @@ async function runRewrite(args) {
       code = 1;
     }
   }
-  process.exit(code);
+  return code;
+}
+
+function isUsageError(error) {
+  return error instanceof ConfigError || /^unknown option: --|^option --.+ requires a value$|^config not found: /.test(error.message);
 }
 
 async function main() {
@@ -98,24 +102,25 @@ async function main() {
   const command = argv.shift();
   if (command === "--version" || command === "-V") {
     console.log(`watermark-cleaner ${require("../package.json").version}`);
-    process.exit(0);
+    return 0;
   }
   if (!Object.prototype.hasOwnProperty.call(KNOWN_FLAGS, command)) {
     usage();
-    process.exit(command === "--help" || command === "-h" ? 0 : 1);
+    return command === "--help" || command === "-h" ? 0 : 1;
   }
-  let args;
   try {
-    args = parseArgs(argv, KNOWN_FLAGS[command]);
+    const args = parseArgs(argv, KNOWN_FLAGS[command]);
     if (command === "check" || command === "fix") return runScan(command, args);
     return await runRewrite(args);
   } catch (error) {
-    if (error instanceof ConfigError || /^unknown option: --|^option --.+ requires a value$|^config not found: /.test(error.message)) {
+    if (isUsageError(error)) {
       console.error(error.message);
-      process.exit(2);
+      return 2;
     }
     throw error;
   }
 }
 
-main();
+main().then((code) => {
+  process.exitCode = code;
+});

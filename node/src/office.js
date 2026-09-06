@@ -4,36 +4,75 @@ const zlib = require("zlib");
 
 const { isSymlink, writeAtomic } = require("./safeio");
 
-const DOCX_CORE_TAGS = ["creator", "lastModifiedBy"];
-const DOCX_APP_TAGS = ["Application", "Company", "Manager"];
-const ODT_META_TAGS = ["creator", "initial-creator", "generator"];
+const DOCX_RULES = [
+  { part: "docProps/core.xml", remove: ["creator", "lastModifiedBy"] },
+  { part: "docProps/app.xml", remove: ["Application", "AppVersion", "Company", "Manager", "Template", "TotalTime"] },
+  { part: "word/people.xml", remove: ["person"] },
+  { part: "word/*.xml", blankAttributes: ["author", "initials"] },
+];
+const ODT_RULES = [
+  { part: "meta.xml", remove: ["creator", "initial-creator", "generator", "editing-duration", "printed-by"] },
+  { part: "content.xml", empty: ["creator"] },
+];
+const RULES = { ".docx": DOCX_RULES, ".odt": ODT_RULES };
 
-const TARGETS = {
-  ".docx": { "docProps/core.xml": DOCX_CORE_TAGS, "docProps/app.xml": DOCX_APP_TAGS },
-  ".odt": { "meta.xml": ODT_META_TAGS },
-};
-
-const ALL_TAGS = new Set();
-for (const targets of Object.values(TARGETS)) {
-  for (const tags of Object.values(targets)) {
-    for (const tag of tags) ALL_TAGS.add(tag);
+function partMatches(pattern, name) {
+  if (pattern.endsWith("/*.xml")) {
+    const directory = pattern.slice(0, -"*.xml".length);
+    const remainder = name.slice(directory.length);
+    return name.startsWith(directory) && remainder.endsWith(".xml") && !remainder.includes("/");
   }
+  return pattern === name;
 }
 
-function tagPattern(tag) {
-  const name = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`<([\\w.]+:)?${name}\\b[^>]*/>|<([\\w.]+:)?${name}\\b[^>]*>[\\s\\S]*?</([\\w.]+:)?${name}>`, "g");
+function rulesFor(rules, name) {
+  return rules.filter((rule) => partMatches(rule.part, name));
 }
 
-const PATTERNS = {};
-for (const tag of ALL_TAGS) PATTERNS[tag] = tagPattern(tag);
+function escapeName(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-function stripTags(text, tags) {
+const patternCache = new Map();
+
+function cachedPattern(key, make) {
+  if (!patternCache.has(key)) patternCache.set(key, make());
+  return patternCache.get(key);
+}
+
+function removePattern(tag) {
+  const name = escapeName(tag);
+  return cachedPattern(`remove:${tag}`, () => new RegExp(`<([\\w.]+:)?${name}\\b[^>]*/>|<([\\w.]+:)?${name}\\b[^>]*>[\\s\\S]*?</([\\w.]+:)?${name}>`, "g"));
+}
+
+function emptyPattern(tag) {
+  const name = escapeName(tag);
+  return cachedPattern(`empty:${tag}`, () => new RegExp(`(<(?:[\\w.]+:)?${name}\\b[^>]*>)([\\s\\S]*?)(</(?:[\\w.]+:)?${name}>)`, "g"));
+}
+
+function attributePattern(attribute) {
+  const name = escapeName(attribute);
+  return cachedPattern(`attribute:${attribute}`, () => new RegExp(`(\\s(?:[\\w.]+:)?${name}=)(["'])([^"']*)\\2`, "g"));
+}
+
+function scrub(text, rule) {
   let count = 0;
-  for (const tag of tags) {
-    text = text.replace(PATTERNS[tag], () => {
+  for (const tag of rule.remove || []) {
+    text = text.replace(removePattern(tag), () => {
       count += 1;
       return "";
+    });
+  }
+  for (const tag of rule.empty || []) {
+    text = text.replace(emptyPattern(tag), (match, open, inner, close) => {
+      if (inner) count += 1;
+      return open + close;
+    });
+  }
+  for (const attribute of rule.blankAttributes || []) {
+    text = text.replace(attributePattern(attribute), (match, lead, quote, value) => {
+      if (value) count += 1;
+      return lead + quote + quote;
     });
   }
   return { text, count };
@@ -59,10 +98,10 @@ function cleanFile(file, write, backup) {
 function processFile(file, write, backup) {
   const suffix = path.extname(file).toLowerCase();
   const report = emptyReport(file);
-  const targets = TARGETS[suffix];
-  if (!targets) return report;
+  const rules = RULES[suffix];
+  if (!rules) return report;
   const data = fs.readFileSync(file);
-  const result = cleanZip(data, targets);
+  const result = cleanZip(data, rules);
   if (result === null) {
     addFinding(report, "warn", "office", "could not parse (file left untouched)", 1);
     return report;
@@ -221,7 +260,7 @@ function crc32(buffer) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function cleanZip(data, targets) {
+function cleanZip(data, rules) {
   const entries = parseCentralDirectory(data);
   if (entries === null) return null;
 
@@ -238,8 +277,8 @@ function cleanZip(data, targets) {
     let usize = entry.usize;
     let method = entry.method;
     let modified = false;
-    const tags = targets[entry.filename];
-    if (tags) {
+    const partRules = rulesFor(rules, entry.filename);
+    if (partRules.length) {
       if (entry.usize > MAX_METADATA_BYTES) return null;
       const content = decompressEntry(compData, entry.method);
       if (content === null) return null;
@@ -250,7 +289,13 @@ function cleanZip(data, targets) {
         text = null;
       }
       if (text !== null) {
-        const { text: newText, count } = stripTags(text, tags);
+        let newText = text;
+        let count = 0;
+        for (const rule of partRules) {
+          const result = scrub(newText, rule);
+          newText = result.text;
+          count += result.count;
+        }
         if (count) {
           strippedTotal += count;
           modified = true;
@@ -334,4 +379,4 @@ function backupFile(file) {
   if (!fs.existsSync(bak)) fs.copyFileSync(file, bak);
 }
 
-module.exports = { inspectFile, cleanFile, crc32, TARGETS };
+module.exports = { inspectFile, cleanFile, crc32, RULES };

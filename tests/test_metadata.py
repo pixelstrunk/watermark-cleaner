@@ -8,7 +8,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "python"))
 os.environ.setdefault("WATERMARK_CLEANER_RULES_DIR", os.path.join(ROOT, "rules"))
 
-from watermark_cleaner.layers.metadata import _strip_jpeg, _strip_png, _strip_webp, clean_file
+from watermark_cleaner.layers.metadata import _strip_jpeg, _strip_png, _strip_webp, clean_file, inspect_file
 
 
 def jpeg_segment(marker, payload):
@@ -157,6 +157,42 @@ class IccHandling(unittest.TestCase):
         cleaned, stripped = _strip_webp(data)
         self.assertEqual(stripped, 0)
         self.assertIn(b"ICCP", cleaned)
+
+
+LATIN1_SVG = (
+    b'<?xml version="1.0" encoding="ISO-8859-1"?>\n<!-- Generator: Adobe Illustrator -->\n'
+    b'<svg xmlns="http://www.w3.org/2000/svg"><title>Caf\xe9 M\xfcnchen</title></svg>\n'
+)
+UTF8_SVG = (
+    '<?xml version="1.0" encoding="UTF-8"?>\r\n<!-- Generator: Adobe Illustrator -->\r\n'
+    '<svg xmlns="http://www.w3.org/2000/svg"><metadata><rdf:RDF>secret</rdf:RDF></metadata>'
+    "<title>Caf\u00e9 M\u00fcnchen</title></svg>\r\n"
+).encode("utf-8")
+
+
+class SvgHandling(unittest.TestCase):
+    def test_utf8_svg_loses_comments_and_metadata_but_keeps_text_and_line_endings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "logo.svg"
+            target.write_bytes(UTF8_SVG)
+            report = clean_file(str(target), write=True, backup=False)
+            self.assertTrue(report.changed)
+            result = target.read_bytes()
+            self.assertNotIn(b"Illustrator", result)
+            self.assertNotIn(b"secret", result)
+            self.assertIn("Caf\u00e9 M\u00fcnchen".encode("utf-8"), result)
+            self.assertIn(b"\r\n", result)
+
+    def test_non_utf8_svg_is_skipped_with_warning_in_check_and_fix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "old.svg"
+            target.write_bytes(LATIN1_SVG)
+            for report in (inspect_file(str(target)), clean_file(str(target), write=True, backup=False)):
+                self.assertFalse(report.changed)
+                self.assertEqual([f.message for f in report.findings], ["skipped (not utf-8 text)"])
+                self.assertEqual(report.findings[0].severity, "warn")
+            self.assertEqual(target.read_bytes(), LATIN1_SVG)
+            self.assertFalse((Path(tmp) / "old.svg.bak").exists())
 
 
 class FileRoundTrip(unittest.TestCase):

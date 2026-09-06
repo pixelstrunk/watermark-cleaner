@@ -50,8 +50,17 @@ function processFile(file, write, backup, stripIcc) {
   return report;
 }
 
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+
 function handleSvg(file, report, write, backup) {
-  const data = fs.readFileSync(file, "utf-8");
+  let data;
+  try {
+    data = strictUtf8.decode(fs.readFileSync(file));
+  } catch (error) {
+    report.findings.push({ layer: "io", kind: "read", severity: "warn", message: "skipped (not utf-8 text)", count: 1, examples: [] });
+    report.counts.warn += 1;
+    return;
+  }
   const hits = (data.match(SVG_METADATA) || []).length + (data.match(SVG_XMP) || []).length;
   const comments = (data.match(SVG_COMMENT) || []).length;
   const total = hits + comments;

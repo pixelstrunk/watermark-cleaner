@@ -15,6 +15,32 @@ def _in_ranges(code, ranges):
     return any(start <= code <= end for start, end in ranges)
 
 
+_LATIN_LETTER_RANGES = ((0x41, 0x5A), (0x61, 0x7A), (0xC0, 0xD6), (0xD8, 0xF6), (0xF8, 0x24F))
+
+
+def _is_digit(char):
+    return "0" <= char <= "9"
+
+
+def _is_letter(char):
+    return bool(char) and _in_ranges(ord(char), _LATIN_LETTER_RANGES)
+
+
+def _guarded_space(text, index):
+    prev_char = text[index - 1] if index > 0 else ""
+    next_char = text[index + 1] if index + 1 < len(text) else ""
+    if _is_digit(prev_char) or _is_digit(next_char):
+        return True
+    if prev_char != "." or index < 2 or not _is_letter(next_char):
+        return False
+    before_dot = text[index - 2]
+    if _is_digit(before_dot):
+        return True
+    single_letter = index < 3 or not _is_letter(text[index - 3])
+    closes_abbreviation = index + 2 < len(text) and text[index + 2] == "."
+    return _is_letter(before_dot) and single_letter and closes_abbreviation
+
+
 def _build_removal(rules, config):
     chars = rules["characters"]
     names = {}
@@ -37,6 +63,10 @@ def _build_removal(rules, config):
         for code in range(_cp(vs["supplementary_from"]), _cp(vs["supplementary_to"]) + 1):
             removal.add(code)
             names[code] = "variation selector"
+        if "mongolian_from" in vs:
+            for code in range(_cp(vs["mongolian_from"]), _cp(vs["mongolian_to"]) + 1):
+                removal.add(code)
+                names[code] = "variation selector"
     return removal, names
 
 
@@ -65,7 +95,10 @@ def clean(text, config, rules):
 
     zwnj = _cp(chars["zwnj"]["cp"]) if "zwnj" in chars else None
     zwnj_name = chars.get("zwnj", {}).get("name", "zero width non-joiner")
+    zwj = _cp(chars["zwj"]["cp"]) if "zwj" in chars else None
+    zwj_name = chars.get("zwj", {}).get("name", "zero width joiner")
     joining = _ranges(chars.get("joining_script_ranges", []))
+    emoji = _ranges(chars.get("emoji_ranges", []))
     rtl = _ranges(chars.get("rtl_ranges", []))
     has_rtl = any(_in_ranges(ord(ch), rtl) for ch in text)
 
@@ -86,6 +119,15 @@ def clean(text, config, rules):
             removed[code] = removed.get(code, 0) + 1
             names[code] = zwnj_name
             continue
+        if code == zwj:
+            prev_code = ord(text[index - 1]) if index > 0 else -1
+            next_code = ord(text[index + 1]) if index + 1 < length else -1
+            if any(_in_ranges(neighbour, joining) or _in_ranges(neighbour, emoji) for neighbour in (prev_code, next_code)):
+                out.append(char)
+                continue
+            removed[code] = removed.get(code, 0) + 1
+            names[code] = zwj_name
+            continue
         if code in bidi:
             if has_rtl:
                 out.append(char)
@@ -98,12 +140,9 @@ def clean(text, config, rules):
             removed[code] = removed.get(code, 0) + 1
             continue
         if code in exotic:
-            if keep_numbers and code in guards:
-                prev_char = text[index - 1] if index > 0 else ""
-                next_char = text[index + 1] if index + 1 < length else ""
-                if "0" <= prev_char <= "9" and "0" <= next_char <= "9":
-                    out.append(char)
-                    continue
+            if keep_numbers and code in guards and _guarded_space(text, index):
+                out.append(char)
+                continue
             out.append(" ")
             replaced_spaces += 1
             continue

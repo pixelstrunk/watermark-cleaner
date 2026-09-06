@@ -45,8 +45,11 @@ def _process(path, write, backup, strip_icc=False):
 
 
 def _handle_svg(path, report, write, backup):
-    with open(path, "r", encoding="utf-8", errors="ignore", newline="") as handle:
-        data = handle.read()
+    try:
+        data = Path(path).read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        report.findings.append(Finding("io", "read", "warn", "skipped (not utf-8 text)", 1))
+        return
     hits = len(_SVG_METADATA.findall(data)) + len(_SVG_XMP.findall(data))
     comments = len(_SVG_COMMENT.findall(data))
     total = hits + comments

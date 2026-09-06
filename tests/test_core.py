@@ -8,6 +8,7 @@ os.environ.setdefault("WATERMARK_CLEANER_RULES_DIR", os.path.join(ROOT, "rules")
 
 from watermark_cleaner.config import DEFAULTS, apply_aggressive
 from watermark_cleaner.core import clean_text
+from watermark_cleaner.rules import load_rules
 
 
 def clean(text, **overrides):
@@ -46,6 +47,63 @@ class CharacterLayer(unittest.TestCase):
     def test_number_nbsp_dropped_when_disabled(self):
         cleaned, _ = clean("12 000", keep_nbsp_in_numbers=False)
         self.assertEqual(cleaned, "12 000")
+
+
+class GuardedSpaces(unittest.TestCase):
+    def test_nbsp_next_to_digits_and_units_kept(self):
+        for text in ["10\u00a0%", "5\u00a0kg", "\u00a7\u00a05", "20\u00a0Euro", "Nr.\u00a05", "Kapitel\u00a03", "12\u00a0000"]:
+            with self.subTest(text=text):
+                cleaned, _ = clean(text)
+                self.assertEqual(cleaned, text)
+
+    def test_nbsp_after_ordinal_and_in_abbreviations_kept(self):
+        for text in ["am 5.\u00a0Mai", "z.\u00a0B. so", "d.\u00a0h. nie", "i.\u00a0d.\u00a0R. oft", "o.\u00a0\u00c4. auch"]:
+            with self.subTest(text=text):
+                cleaned, _ = clean(text)
+                self.assertEqual(cleaned, text)
+
+    def test_nbsp_between_words_and_sentences_replaced(self):
+        for text, expected in [
+            ("Hallo\u00a0Welt", "Hallo Welt"),
+            ("Ende.\u00a0Neuer Satz.", "Ende. Neuer Satz."),
+            ("Dr.\u00a0M\u00fcller", "Dr. M\u00fcller"),
+            ("Abs.\u00a0Text", "Abs. Text"),
+        ]:
+            with self.subTest(text=text):
+                cleaned, _ = clean(text)
+                self.assertEqual(cleaned, expected)
+
+    def test_guard_disabled_replaces_everything(self):
+        cleaned, _ = clean("10\u00a0% z.\u00a0B.", keep_nbsp_in_numbers=False)
+        self.assertEqual(cleaned, "10 % z. B.")
+
+
+class HiddenCharacterCoverage(unittest.TestCase):
+    def test_zwj_between_latin_letters_removed(self):
+        cleaned, report = clean("wa\u200dter\u200dmark")
+        self.assertEqual(cleaned, "watermark")
+        self.assertEqual(report.findings[0].count, 2)
+        self.assertIn("zero width joiner", report.findings[0].message)
+
+    def test_zwj_kept_in_emoji_and_indic_sequences(self):
+        for text in ["\U0001f468\u200d\U0001f469\u200d\U0001f467", "\u2764\ufe0f\u200d\U0001f525", "\u0915\u094d\u200d\u0937"]:
+            with self.subTest(text=text):
+                cleaned, _ = clean(text)
+                self.assertEqual(cleaned, text)
+
+    def test_deprecated_format_and_annotation_characters_removed(self):
+        cleaned, _ = clean("a\u206ab\u206fc\ufff9d\ufffae\ufffbf\u3164g\uffa0h")
+        self.assertEqual(cleaned, "abcdefgh")
+
+    def test_line_separators_and_braille_blank_become_spaces(self):
+        cleaned, _ = clean("one\u2028two\u2029three\u2800four")
+        self.assertEqual(cleaned, "one two three four")
+
+    def test_mongolian_selectors_only_stripped_when_aggressive(self):
+        kept, _ = clean("a\u180bb")
+        self.assertEqual(kept, "a\u180bb")
+        stripped, _ = clean("a\u180bb", strip_variation_selectors=True)
+        self.assertEqual(stripped, "ab")
 
 
 class ScriptSafety(unittest.TestCase):
@@ -144,6 +202,69 @@ class Homoglyphs(unittest.TestCase):
         config = apply_aggressive(dict(DEFAULTS))
         cleaned, _ = clean_text("prіce", config=config)
         self.assertEqual(cleaned, "price")
+
+
+class HomoglyphScriptContext(unittest.TestCase):
+    def test_pure_cyrillic_text_is_not_flagged(self):
+        text = "Привет, это обычный русский текст."
+        cleaned, report = clean(text, replace_homoglyphs=True)
+        self.assertEqual(cleaned, text)
+        self.assertEqual(report.findings, [])
+
+    def test_pure_greek_text_is_not_flagged(self):
+        text = "Αθήνα και Βόρεια Ελλάδα"
+        cleaned, report = clean(text, replace_homoglyphs=True)
+        self.assertEqual(cleaned, text)
+        self.assertEqual(report.findings, [])
+
+    def test_mixed_script_word_is_flagged_and_replaced(self):
+        cleaned, report = clean("log in at pаypal now", replace_homoglyphs=True)
+        self.assertEqual(cleaned, "log in at paypal now")
+        self.assertEqual(report.findings[0].count, 1)
+
+    def test_all_confusable_word_in_latin_document_is_flagged(self):
+        cleaned, report = clean("Visit СОРЕ today", replace_homoglyphs=True)
+        self.assertEqual(cleaned, "Visit COPE today")
+        self.assertEqual(report.findings[0].count, 4)
+
+    def test_all_confusable_word_next_to_genuine_cyrillic_is_kept(self):
+        text = "Слово а значит and"
+        cleaned, report = clean(text, replace_homoglyphs=True)
+        self.assertEqual(cleaned, text)
+        self.assertEqual(report.findings, [])
+
+    def test_mixed_word_inside_cyrillic_document_is_still_flagged(self):
+        cleaned, report = clean("Привет, log in at pаypal", replace_homoglyphs=True)
+        self.assertEqual(cleaned, "Привет, log in at paypal")
+        self.assertEqual(report.findings[0].count, 1)
+
+
+class SentenceShapeRulebook(unittest.TestCase):
+    def test_every_shape_matches_its_own_example(self):
+        for shape in load_rules()["phrases"]["sentence_shapes"]:
+            with self.subTest(shape=shape["id"]):
+                _, report = clean(shape["example"])
+                ids = [i for f in report.findings if f.kind == "sentence-shape" for i in f.examples]
+                self.assertIn(shape["id"], ids)
+
+    def test_period_separated_shapes_block(self):
+        for text in [
+            "Agile is dead. Flow is the future.",
+            "Stop thinking features. Start thinking jobs.",
+            "The question isn't how. The question is why.",
+            "You don't need more tools. You need focus.",
+        ]:
+            with self.subTest(text=text):
+                _, report = clean(text)
+                self.assertTrue(report.has_blocking)
+
+    def test_comma_separated_shapes_still_block(self):
+        _, report = clean("Agile is dead, flow is the future.")
+        self.assertTrue(report.has_blocking)
+
+    def test_unrelated_sentences_do_not_block(self):
+        _, report = clean("Agile is dead. We moved on. Years later, nobody asked what is the future.")
+        self.assertFalse(report.has_blocking)
 
 
 class CodeProtection(unittest.TestCase):

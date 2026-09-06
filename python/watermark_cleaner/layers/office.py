@@ -3,21 +3,25 @@ import re
 import struct
 import zipfile
 import zlib
+from functools import lru_cache
 from pathlib import Path
 
 from ..findings import Finding, Report
 from ..safeio import is_symlink, write_bytes_atomic
 
-_DOCX_CORE_TAGS = ("creator", "lastModifiedBy")
-_DOCX_APP_TAGS = ("Application", "Company", "Manager")
-_ODT_META_TAGS = ("creator", "initial-creator", "generator")
+_DOCX_RULES = (
+    {"part": "docProps/core.xml", "remove": ("creator", "lastModifiedBy")},
+    {"part": "docProps/app.xml", "remove": ("Application", "AppVersion", "Company", "Manager", "Template", "TotalTime")},
+    {"part": "word/people.xml", "remove": ("person",)},
+    {"part": "word/*.xml", "blank_attributes": ("author", "initials")},
+)
+_ODT_RULES = (
+    {"part": "meta.xml", "remove": ("creator", "initial-creator", "generator", "editing-duration", "printed-by")},
+    {"part": "content.xml", "empty": ("creator",)},
+)
+_RULES = {".docx": _DOCX_RULES, ".odt": _ODT_RULES}
 
-_TARGETS = {
-    ".docx": {"docProps/core.xml": _DOCX_CORE_TAGS, "docProps/app.xml": _DOCX_APP_TAGS},
-    ".odt": {"meta.xml": _ODT_META_TAGS},
-}
-
-_SUPPORTED_SUFFIXES = tuple(_TARGETS)
+_SUPPORTED_SUFFIXES = tuple(_RULES)
 
 _LOCAL_HEADER_SIZE = 30
 _LOCAL_HEADER_SIGNATURE = b"PK\x03\x04"
@@ -28,7 +32,20 @@ _ENCRYPTED_FLAG = 0x0001
 _MAX_METADATA_BYTES = 64 * 1024 * 1024
 
 
-def _tag_pattern(tag):
+def _part_matches(pattern, name):
+    if pattern.endswith("/*.xml"):
+        directory = pattern[: -len("*.xml")]
+        remainder = name[len(directory):]
+        return name.startswith(directory) and remainder.endswith(".xml") and "/" not in remainder
+    return pattern == name
+
+
+def _rules_for(rules, name):
+    return [rule for rule in rules if _part_matches(rule["part"], name)]
+
+
+@lru_cache(maxsize=None)
+def _remove_pattern(tag):
     name = re.escape(tag)
     return re.compile(
         rf"<([\w.]+:)?{name}\b[^>]*/>|<([\w.]+:)?{name}\b[^>]*>.*?</([\w.]+:)?{name}>",
@@ -36,16 +53,40 @@ def _tag_pattern(tag):
     )
 
 
-_ALL_TAGS = sorted({tag for targets in _TARGETS.values() for tags in targets.values() for tag in tags})
-_PATTERNS = {tag: _tag_pattern(tag) for tag in _ALL_TAGS}
+@lru_cache(maxsize=None)
+def _empty_pattern(tag):
+    name = re.escape(tag)
+    return re.compile(rf"(<(?:[\w.]+:)?{name}\b[^>]*>)(.*?)(</(?:[\w.]+:)?{name}>)", re.DOTALL)
 
 
-def _strip_tags(text, tags):
+@lru_cache(maxsize=None)
+def _attribute_pattern(attribute):
+    name = re.escape(attribute)
+    return re.compile(rf"(\s(?:[\w.]+:)?{name}=)([\"'])([^\"']*)\2")
+
+
+def _scrub(text, rule):
     count = 0
-    for tag in tags:
-        text, n = _PATTERNS[tag].subn("", text)
+    for tag in rule.get("remove", ()):
+        text, n = _remove_pattern(tag).subn("", text)
         count += n
+    for tag in rule.get("empty", ()):
+        pattern = _empty_pattern(tag)
+        count += sum(1 for match in pattern.finditer(text) if match.group(2))
+        text = pattern.sub(_keep_open_and_close, text)
+    for attribute in rule.get("blank_attributes", ()):
+        pattern = _attribute_pattern(attribute)
+        count += sum(1 for match in pattern.finditer(text) if match.group(3))
+        text = pattern.sub(_blank_attribute_value, text)
     return text, count
+
+
+def _keep_open_and_close(match):
+    return match.group(1) + match.group(3)
+
+
+def _blank_attribute_value(match):
+    return match.group(1) + match.group(2) + match.group(2)
 
 
 def inspect_file(path):
@@ -59,11 +100,11 @@ def clean_file(path, write=True, backup=True):
 def _process(path, write, backup):
     suffix = Path(path).suffix.lower()
     report = Report(path=str(path))
-    targets = _TARGETS.get(suffix)
-    if targets is None:
+    rules = _RULES.get(suffix)
+    if rules is None:
         return report
     data = Path(path).read_bytes()
-    result = _clean_zip(data, targets)
+    result = _clean_zip(data, rules)
     if result is None:
         report.findings.append(Finding("metadata", "office", "warn", "could not parse (file left untouched)", 1))
         return report
@@ -86,7 +127,7 @@ def _process(path, write, backup):
     return report
 
 
-def _clean_zip(data, targets):
+def _clean_zip(data, rules):
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
         infos = zf.infolist()
@@ -108,8 +149,8 @@ def _clean_zip(data, targets):
         header_bytes, comp_data = span
         crc, csize, usize, method = info.CRC, info.compress_size, info.file_size, info.compress_type
         modified = False
-        tags = targets.get(info.filename)
-        if tags:
+        part_rules = _rules_for(rules, info.filename)
+        if part_rules:
             if info.file_size > _MAX_METADATA_BYTES:
                 return None
             content = _decompress(comp_data, info.compress_type)
@@ -120,7 +161,11 @@ def _clean_zip(data, targets):
             except UnicodeDecodeError:
                 text = None
             if text is not None:
-                new_text, n = _strip_tags(text, tags)
+                new_text = text
+                n = 0
+                for rule in part_rules:
+                    new_text, rule_count = _scrub(new_text, rule)
+                    n += rule_count
                 if n:
                     stripped_total += n
                     modified = True

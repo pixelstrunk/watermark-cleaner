@@ -31,12 +31,36 @@ function buildRemoval(rules, config) {
       removal.add(code);
       names.set(code, "variation selector");
     }
+    if (vs.mongolian_from) {
+      for (let code = hex(vs.mongolian_from); code <= hex(vs.mongolian_to); code += 1) {
+        removal.add(code);
+        names.set(code, "variation selector");
+      }
+    }
   }
   return { removal, names };
 }
 
 function isDigit(cp) {
   return cp >= 0x30 && cp <= 0x39;
+}
+
+const LATIN_LETTER_RANGES = [[0x41, 0x5a], [0x61, 0x7a], [0xc0, 0xd6], [0xd8, 0xf6], [0xf8, 0x24f]];
+
+function isLetter(cp) {
+  return cp >= 0 && inRanges(cp, LATIN_LETTER_RANGES);
+}
+
+function guardedSpace(points, i) {
+  const prev = i > 0 ? points[i - 1] : -1;
+  const next = i + 1 < points.length ? points[i + 1] : -1;
+  if (isDigit(prev) || isDigit(next)) return true;
+  if (prev !== 0x2e || i < 2 || !isLetter(next)) return false;
+  const beforeDot = points[i - 2];
+  if (isDigit(beforeDot)) return true;
+  const singleLetter = i < 3 || !isLetter(points[i - 3]);
+  const closesAbbreviation = i + 2 < points.length && points[i + 2] === 0x2e;
+  return isLetter(beforeDot) && singleLetter && closesAbbreviation;
 }
 
 function buildBidi(rules) {
@@ -75,7 +99,10 @@ function cleanCharacters(text, config, rules) {
 
   const zwnj = chars.zwnj ? hex(chars.zwnj.cp) : null;
   const zwnjName = chars.zwnj ? chars.zwnj.name : "zero width non-joiner";
+  const zwj = chars.zwj ? hex(chars.zwj.cp) : null;
+  const zwjName = chars.zwj ? chars.zwj.name : "zero width joiner";
   const joining = toRanges(chars.joining_script_ranges);
+  const emoji = toRanges(chars.emoji_ranges);
   const rtl = toRanges(chars.rtl_ranges);
 
   const points = Array.from(text, (ch) => ch.codePointAt(0));
@@ -98,6 +125,17 @@ function cleanCharacters(text, config, rules) {
       names.set(cp, zwnjName);
       continue;
     }
+    if (zwj !== null && cp === zwj) {
+      const prev = i > 0 ? points[i - 1] : -1;
+      const next = i + 1 < points.length ? points[i + 1] : -1;
+      if ([prev, next].some((neighbour) => inRanges(neighbour, joining) || inRanges(neighbour, emoji))) {
+        out.push(String.fromCodePoint(cp));
+        continue;
+      }
+      removed.set(cp, (removed.get(cp) || 0) + 1);
+      names.set(cp, zwjName);
+      continue;
+    }
     if (bidi.has(cp)) {
       if (hasRtl) {
         out.push(String.fromCodePoint(cp));
@@ -113,7 +151,7 @@ function cleanCharacters(text, config, rules) {
       continue;
     }
     if (exotic.has(cp)) {
-      if (keepNumbers && guards.has(cp) && i > 0 && i + 1 < points.length && isDigit(points[i - 1]) && isDigit(points[i + 1])) {
+      if (keepNumbers && guards.has(cp) && guardedSpace(points, i)) {
         out.push(String.fromCodePoint(cp));
         continue;
       }
@@ -195,27 +233,68 @@ function cleanTypography(text, config, rules) {
   return { text, findings };
 }
 
+const WORD = /\p{L}+/gu;
+const LATIN_RANGES = [[0x41, 0x5a], [0x61, 0x7a], [0xc0, 0xd6], [0xd8, 0xf6], [0xf8, 0x24f], [0x1e00, 0x1eff]];
+const CONFUSABLE_SCRIPT_RANGES = [[0x370, 0x3ff], [0x400, 0x52f]];
+
+function classifyWord(word, table) {
+  let hasLatin = false;
+  let hasConfusable = false;
+  let hasGenuineForeign = false;
+  for (const ch of word) {
+    const cp = ch.codePointAt(0);
+    if (table.has(cp)) hasConfusable = true;
+    else if (inRanges(cp, LATIN_RANGES)) hasLatin = true;
+    else if (inRanges(cp, CONFUSABLE_SCRIPT_RANGES)) hasGenuineForeign = true;
+  }
+  return { hasLatin, hasConfusable, hasGenuineForeign };
+}
+
+function suspiciousWords(text, table) {
+  const classified = [];
+  WORD.lastIndex = 0;
+  let match;
+  while ((match = WORD.exec(text)) !== null) {
+    classified.push({ index: match.index, word: match[0], ...classifyWord(match[0], table) });
+  }
+  const documentHasForeignScript = classified.some((c) => c.hasGenuineForeign);
+  return classified.filter((c) => c.hasConfusable && !c.hasGenuineForeign && (c.hasLatin || !documentHasForeignScript));
+}
+
 function cleanHomoglyphs(text, config, rules) {
   const mapping = rules.homoglyphs.confusables;
+  const table = new Map(Object.entries(mapping).map(([h, rep]) => [hex(h), rep]));
   const findings = [];
-  const seen = [];
+
+  const suspicious = suspiciousWords(text, table);
+  const seen = new Set();
   let total = 0;
-  const table = new Map();
-  for (const [h, rep] of Object.entries(mapping)) {
-    const ch = String.fromCodePoint(hex(h));
-    const count = text.split(ch).length - 1;
-    if (count) {
-      total += count;
-      table.set(ch, rep);
-      seen.push(hex(h));
+  for (const { word } of suspicious) {
+    for (const ch of word) {
+      const cp = ch.codePointAt(0);
+      if (table.has(cp)) {
+        seen.add(cp);
+        total += 1;
+      }
     }
   }
+
   if (!total) return { text, findings };
+
   if (config.replace_homoglyphs) {
-    for (const [ch, rep] of table.entries()) text = text.split(ch).join(rep);
+    const parts = [];
+    let last = 0;
+    for (const { index, word } of suspicious) {
+      parts.push(text.slice(last, index));
+      parts.push(Array.from(word, (ch) => table.get(ch.codePointAt(0)) || ch).join(""));
+      last = index + word.length;
+    }
+    parts.push(text.slice(last));
+    text = parts.join("");
     findings.push(finding("homoglyphs", "confusable", "fixed", "replaced look-alike letters with ascii", total));
   } else {
-    const examples = seen.slice(0, 8).map((c) => `U+${c.toString(16).toUpperCase().padStart(4, "0")}`);
+    const ordered = Object.keys(mapping).map(hex).filter((cp) => seen.has(cp));
+    const examples = ordered.slice(0, 8).map((c) => `U+${c.toString(16).toUpperCase().padStart(4, "0")}`);
     findings.push(finding("homoglyphs", "confusable", "warn", "look-alike letters found (enable replace_homoglyphs or --aggressive to fix)", total, examples));
   }
   return { text, findings };

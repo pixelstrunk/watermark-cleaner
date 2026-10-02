@@ -8,9 +8,9 @@ function counts(findings) {
   return result;
 }
 
-const PROTECT_AWARE = new Set(["typography", "voice"]);
+const PROTECT_AWARE = new Set(["entities", "typography", "voice", "artifacts"]);
 
-const PROTECTED = /^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|(?![\s\S]))|```[\s\S]*?(?:```|(?![\s\S]))|~~~[\s\S]*?(?:~~~|(?![\s\S]))|`[^`\r\n]+`/g;
+const PROTECTED = /^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|(?![\s\S]))|```[\s\S]*?(?:```|(?![\s\S]))|~~~[\s\S]*?(?:~~~|(?![\s\S]))|``[^\r\n]*?``|`[^`\r\n]+`/g;
 
 function runOnUnprotected(fn, text, config, rules) {
   const parts = [];

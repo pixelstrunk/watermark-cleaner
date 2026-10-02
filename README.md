@@ -7,7 +7,7 @@ Remove AI text artifacts, hidden unicode characters and file metadata before you
 [![npm](https://img.shields.io/npm/v/watermark-cleaner?cacheSeconds=3600)](https://www.npmjs.com/package/watermark-cleaner)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Watermark Cleaner is a deterministic, offline, zero-dependency tool for content you own. It cleans the mechanical traces that mark text as machine generated, flags the stylistic phrases that read as AI writing, and strips identifying metadata from images without touching a single pixel. It ships as a Python CLI and a Node CLI that share one rule set and are tested to behave identically.
+Watermark Cleaner is a deterministic, offline, zero-dependency tool for content you own. It cleans the mechanical traces that mark text as machine generated, removes the citation markers and tracking parameters that assistants leave in copied text, flags the stylistic phrases that read as AI writing (English and German), and strips identifying metadata from images and office documents without touching a single pixel. It ships as a Python CLI and a Node CLI that share one rule set and are tested to behave identically.
 
 ## See it
 
@@ -53,11 +53,15 @@ watermark-cleaner check post.md
 watermark-cleaner fix ./content --no-voice
 watermark-cleaner fix ./assets --aggressive     # also replace homoglyphs and strip variation selectors
 watermark-cleaner check . --json
+watermark-cleaner check . --strict        # exit 1 when anything would change, for ci
+pbpaste | watermark-cleaner fix - | pbcopy   # clean the clipboard (macos); report goes to stderr
 ```
 
-`check` is safe to run over an entire folder to see what is inside without touching anything. Exit codes: `check` returns 1 when a file contains AI phrases or AI sentence shapes, so it works as a publish gate. `fix` returns 0 after cleaning what it can; pass `--strict` to make `fix` return 1 when blocking findings remain that need a human rewrite.
+`check` is safe to run over an entire folder to see what is inside without touching anything. Exit codes: `check` returns 1 when a file contains AI phrases or AI sentence shapes, so it works as a publish gate. `check --strict` also returns 1 when anything would change, which turns it into a CI lint for hidden characters and metadata. `fix` returns 0 after cleaning what it can; pass `--strict` to make `fix` return 1 when blocking findings remain that need a human rewrite.
 
-Markdown structure is protected: typography and voice rules never touch fenced code blocks, inline code or YAML frontmatter, so code examples in documentation survive cleaning. Invisible characters are still removed inside code, because hidden characters in code are exactly the Trojan Source attack this tool defends against. Disable with `"protect_code": false` if you want full-document typography.
+A single `-` instead of a path reads standard input. `fix -` writes the cleaned text to stdout and the report to stderr, so it drops into a pipe: copy text from a chat, run it through the cleaner, paste the result.
+
+Markdown structure is protected: typography, voice, entity and artifact rules never touch fenced code blocks, inline code (single or double backticks) or YAML frontmatter, so code examples in documentation survive cleaning. Invisible characters are still removed inside code, because hidden characters in code are exactly the Trojan Source attack this tool defends against. Disable with `"protect_code": false` if you want full-document typography.
 
 ## What it removes, and what it deliberately keeps
 
@@ -67,32 +71,43 @@ Markdown structure is protected: typography and voice rules never touch fenced c
 | Soft hyphen, mongolian vowel separator, combining grapheme joiner | U+00AD, U+180E, U+034F | removed |
 | Invisible math operators | U+2061 to U+2064 | removed |
 | Deprecated format controls, interlinear annotation characters, hangul fillers | U+206A to U+206F, U+FFF9 to U+FFFB, U+3164, U+FFA0 | removed |
-| Unicode tag characters (hidden payloads) | U+E0000 to U+E007F | removed |
+| Unicode tag characters (hidden payloads, tag space) | U+E0000 to U+E007F | removed, except inside well-formed subdivision flag emoji |
+| Private use characters (ChatGPT citation delimiters U+E200 to U+E203 and everything else vendors hide there) | U+E000 to U+F8FF, planes 15 and 16 | removed |
+| Noncharacters | U+FDD0 to U+FDEF, U+FFFE, U+FFFF | removed |
+| Hangul fillers | U+115F, U+1160, U+3164, U+FFA0 | removed |
+| Variation selectors without a base that supports them (letters, spaces, selector chains) | U+FE00 to U+FE0F, U+E0100 to U+E01EF, U+180B to U+180D | removed; after emoji, symbols, digits and CJK they stay |
+| HTML entities of all of the above (`&#8203;`, `&zwnj;`, `&shy;`, `&#xFEFF;`) | decoded, then the same rules apply | removed |
+| Assistant copy artifacts (`citeturn0search0`, `[cite: 1]`, `【1†source】`, `utm_source=chatgpt.com`) | per `rules/artifacts.json` | removed |
 | Exotic spaces and blanks (nbsp, thin space, ideographic space, line and paragraph separator, braille blank) | U+00A0, U+2000 to U+200A, U+202F, U+205F, U+3000, U+2028, U+2029, U+2800 | replaced with a normal space |
-| Smart quotes, ellipsis, bullets, dashes | U+2018 and friends | normalized to ascii |
+| Smart quotes, ellipsis, bullets, dashes, typographic hyphens | U+2018, U+2010, U+2011 and friends | normalized to ascii |
 | Homoglyphs (cyrillic і inside a latin word and friends) | per rulebook | warned, replaced only with `--aggressive` |
 
 Deliberately preserved, because removing them breaks legitimate text:
 
+- Subdivision flag emoji (England, Scotland, Wales). They are a black flag followed by tag characters and a cancel tag; the well-formed sequence stays, a tag character anywhere else is removed.
 - Zero width joiner (U+200D) next to an emoji or inside a script that requires it (Indic scripts, Arabic). Between latin letters it is a watermark and gets removed.
 - Zero width non-joiner (U+200C) when adjacent to a script that requires it (Persian, Arabic, Indic scripts and others). Between latin letters it is a watermark and gets removed.
 - Bidi marks and bidi controls in documents that contain right-to-left text. In pure left-to-right documents they are removed, which is the [Trojan Source](https://trojansource.codes/) defense.
-- Non breaking spaces next to a digit (`12 000`, `10 %`, `5 kg`, `§ 5`, `Nr. 5`), after an ordinal (`5. Mai`) and inside spaced abbreviations (`z. B.`, `d. h.`, `i. d. R.`). Everywhere else, between two words or between two sentences, a non breaking space is a watermark and becomes a normal space. Disable the guard with `keep_nbsp_in_numbers: false`.
-- Variation selectors, including the Mongolian ones (U+180B to U+180D), unless you pass `--aggressive`.
+- Non breaking spaces next to a digit (`12 000`, `10 %`, `5 kg`, `§ 5`, `Nr. 5`), after an ordinal (`5. Mai`), inside spaced abbreviations (`z. B.`, `d. h.`, `i. d. R.`) and in French punctuation (`Il dit : bonjour !`, `« Oui »`). Everywhere else, between two words or between two sentences, a non breaking space is a watermark and becomes a normal space. Disable the guard with `keep_nbsp_in_numbers: false`.
+- A spaced dash between two numbers (`10 – 20 Uhr`, `1990 — 2000`) becomes a plain hyphen, never the comma from `dash_policy`, because a range is not an enumeration.
+- Variation selectors that belong to something: `❤️`, keycaps like `1️⃣`, `©️`, CJK ideographic variations and Mongolian free variation selectors. A selector after a latin letter, a space or another selector carries no meaning and is removed as a hidden payload.
+- The combining grapheme joiner (U+034F) next to Hebrew and the braille blank (U+2800) inside braille text.
 - Genuine Cyrillic and Greek text. Homoglyph detection works per word: a word that mixes latin letters with look-alike letters is flagged, a word written entirely in Cyrillic or Greek is normal text and stays untouched even with `--aggressive`. A word that consists only of look-alike letters (`СОРЕ` spelled in Cyrillic) is flagged only when the document contains no other Cyrillic or Greek text.
 
 ## Coverage
 
 | Channel | Handled | Notes |
 |---|---|---|
-| Invisible/format Unicode (ZWSP, bidi, tag chars, homoglyphs) | Yes | Deterministic, verifiable |
+| Invisible/format Unicode (ZWSP, bidi, tag chars, private use, variation selector payloads, homoglyphs) | Yes | Deterministic, verifiable |
+| HTML entity forms of invisible characters | Yes | Decoded, then the character rules apply |
+| Assistant copy artifacts (citation markers, tracking parameters) | Yes | Deterministic, from `rules/artifacts.json` |
 | Typography (smart quotes, dashes, ellipsis) | Yes | Deterministic, verifiable |
-| AI filler phrases and sentence shapes | Yes | Filler removed, shapes flagged |
+| AI filler phrases and sentence shapes | English and German | Filler removed (English only), shapes flagged |
 | Image metadata: EXIF, XMP, C2PA, comments | JPEG, PNG, WebP, SVG | Lossless, container-level |
-| Image metadata: GIF, TIFF | No | Reported, file left untouched |
-| Document metadata: DOCX, ODT | Yes | Lossless, container-level (see below) |
-| Document metadata: PDF | Not yet | See [Non-goals](#non-goals-stated-plainly) |
-| Statistical/token-level text watermarks (SynthID-style) | Best-effort only, opt-in | Via [DeepL rewrite](#optional-deepl-rewrite), not a deterministic strip |
+| Image metadata: GIF, TIFF, HEIC, HEIF, AVIF | No | Reported, file left untouched |
+| Document metadata: DOCX, PPTX, XLSX, ODT, ODP, ODS | Yes | Lossless, container-level (see below) |
+| Document metadata: PDF | Reported only | `check` lists author, creator, producer and XMP presence; the file is never rewritten, see [Non-goals](#non-goals-stated-plainly) |
+| Statistical/token-level text watermarks (SynthID-Text in Gemini and, since August 2026, Claude) | Best-effort only, opt-in | Via [DeepL rewrite](#optional-deepl-rewrite), not a deterministic strip |
 | Pixel-domain image watermarks | No | Out of scope, see below |
 | Training-time backdoors | No | Out of scope, not a watermarking concern this tool addresses |
 
@@ -102,7 +117,7 @@ Deliberately preserved, because removing them breaks legitimate text:
 
 ## Document metadata, losslessly
 
-DOCX and ODT are ZIP containers. `watermark-cleaner fix` removes the people and the software from them, container-level and lossless. For DOCX that means the author and last-editor fields in `docProps/core.xml`, the application name, application version, template name and total editing time in `docProps/app.xml`, the hidden people list in `word/people.xml`, and the author names and initials on every comment and tracked change in the document body, headers, footers and notes. Comments and tracked changes themselves stay in place, only the name on them is blanked. For ODT it means creator, initial creator, generator, editing duration and printed-by in `meta.xml` plus the creator on every annotation and tracked change in `content.xml`. Every part that carries no such field, including styles and embedded images, is copied through byte-for-byte, verifiable with a byte diff exactly like the image path. Rewritten parts are stored uncompressed so both CLIs produce identical bytes; a document with heavy tracked changes can therefore grow by a few hundred kilobytes. Title, subject, keywords, description and edit dates are left alone; those are content you likely want, not a machine fingerprint. Files that fail to parse as a well-formed ZIP are left untouched. PDF is not supported yet.
+DOCX, PPTX, XLSX, ODT, ODP and ODS are ZIP containers. `watermark-cleaner fix` removes the people and the software from them, container-level and lossless. For DOCX that means the author and last-editor fields in `docProps/core.xml`, the application name, application version, template name and total editing time in `docProps/app.xml`, the hidden people list in `word/people.xml`, and the author names and initials on every comment and tracked change in the document body, headers, footers and notes. Comments and tracked changes themselves stay in place, only the name on them is blanked. PPTX and XLSX get the same core and app treatment plus the names and initials of comment authors (`ppt/commentAuthors.xml`, `ppt/authors.xml`, `xl/comments*.xml`, `xl/persons/person.xml`). For ODT, ODP and ODS it means creator, initial creator, generator, editing duration and printed-by in `meta.xml` plus the creator on every annotation and tracked change in `content.xml`. Every part that carries no such field, including styles and embedded images, is copied through byte-for-byte, verifiable with a byte diff exactly like the image path. Rewritten parts are stored uncompressed so both CLIs produce identical bytes; a document with heavy tracked changes can therefore grow by a few hundred kilobytes. Title, subject, keywords, description and edit dates are left alone; those are content you likely want, not a machine fingerprint. Files that fail to parse as a well-formed ZIP are left untouched. PDF is scanned read-only: `check` tells you when author, creator, producer, XMP or a C2PA manifest is present, and both commands leave the file alone.
 
 ## Use as a publish gate
 
@@ -111,7 +126,7 @@ With the [pre-commit](https://pre-commit.com) framework:
 ```yaml
 repos:
   - repo: https://github.com/pixelstrunk/watermark-cleaner
-    rev: v0.2.1
+    rev: v0.3.0
     hooks:
       - id: watermark-cleaner-fix
 ```
@@ -133,14 +148,14 @@ Cleaning AI text falls into buckets, and this tool is precise about which bucket
 | File metadata | EXIF, XMP and C2PA in images, metadata and comments in SVG, author/app fields in DOCX and ODT | Stripped losslessly, 100% verifiable |
 | Voice | AI filler phrases and AI sentence shapes from a portable rulebook | Filler removed, shapes flagged and blocked |
 
-The voice layer auto-deletes only phrases that are pure filler ("without further ado"). When a deletion opens a sentence, the sentence is repaired: leftover spaces go away and the next word is capitalized. Phrases that carry an object ("let's explore the API") are never cut mid-sentence; they are flagged as errors for a human to rewrite. The phrase rulebook is currently English only.
+The voice layer auto-deletes only phrases that are pure filler ("without further ado"). When a deletion opens a sentence, the sentence is repaired: leftover spaces go away and the next word is capitalized. Phrases that carry an object ("let's explore the API") are never cut mid-sentence; they are flagged as errors for a human to rewrite. The rulebook covers English and German. German phrases are only ever flagged, never deleted, because removing a German clause opener changes the word order of what follows. Chat residue such as "Certainly! Here's" or "I hope this helps" blocks outright; it is the clearest sign that text was pasted from an assistant.
 
 ## Non-goals, stated plainly
 
-- It does not remove statistical text watermarks (the SynthID style signal that some vendors embed in word choice). No deterministic tool can, and there is no public detector to verify removal. Only substantial rewriting degrades that signal.
+- It does not remove statistical text watermarks. Google has embedded SynthID-Text in Gemini output since 2024, and Anthropic announced in August 2026 that all Claude models released after 2 August 2026 carry the same kind of watermark; OpenAI has not deployed one for text. These watermarks live in word choice, add no hidden characters, survive light editing and disappear only under a complete rewrite. No character-level tool can detect or remove them, and no public detector exists to verify removal. The April 2025 reports of ChatGPT inserting narrow no-break spaces were a training artifact that OpenAI removed within days, not a watermark; this tool removes those spaces anyway.
 - It does not auto-rewrite AI sentence shapes. Rewriting a sentence needs judgment, so the tool detects and blocks those shapes instead of replacing them and producing nonsense.
 - It does not certify that text will pass any AI detector, and it is not a way to misrepresent authorship.
-- It does not touch PDF metadata yet. That is a real gap for a "clean before you publish" tool and may land in a future release; today the safest path is to export to a supported format before running the cleaner.
+- It does not rewrite PDF files. Lossless PDF editing needs a full object parser, and an incremental update would leave the old metadata in the file for anyone who looks. `check` reports what a PDF carries; to strip it, use `exiftool -all= file.pdf` or `qpdf`, or export to a supported format before running the cleaner.
 - It does not detect or remove pixel-domain image watermarks (SynthID-class, StegaStamp, Tree-Ring and similar signals embedded in the pixels themselves). That is a fundamentally different, model-heavy problem; this tool only ever touches metadata containers and text, never re-encodes pixels.
 - It does not address training-time backdoors or any watermarking mechanism baked into a model's weights. Out of scope for a client-side content cleaner.
 
@@ -182,7 +197,7 @@ This back translates the text (source to pivot and back) using a model that is n
 
 ## Rules are one source
 
-All character lists and phrase lists live in [`rules/*.json`](rules/). The Python and Node packages read the same files, `scripts/sync-rules.sh` copies them into each package, and CI fails when they drift or when the two CLIs produce different output. Edit the rules once, both tools follow. Contributions to the rulebook are the easiest way to help; see [CONTRIBUTING.md](CONTRIBUTING.md).
+All character lists, phrase lists and copy-artifact patterns live in [`rules/*.json`](rules/). The Python and Node packages read the same files, `scripts/sync-rules.sh` copies them into each package, and CI fails when they drift or when the two CLIs produce different output. Edit the rules once, both tools follow. Contributions to the rulebook are the easiest way to help; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Scope and intent
 

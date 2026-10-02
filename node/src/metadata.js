@@ -18,7 +18,7 @@ const WEBP_VP8X_CLEAR_FLAGS = 0x08 | 0x04;
 const WEBP_VP8X_ICC_FLAG = 0x20;
 
 const LOSSLESS_SUFFIXES = new Set([".jpg", ".jpeg", ".png", ".webp"]);
-const UNSUPPORTED_SUFFIXES = new Set([".gif", ".tif", ".tiff"]);
+const UNSUPPORTED_SUFFIXES = new Set([".gif", ".tif", ".tiff", ".heic", ".heif", ".avif"]);
 
 function emptyReport(file) {
   return { path: file, findings: [], changed: false, counts: { fixed: 0, warn: 0, error: 0 }, has_errors: false };
@@ -66,7 +66,8 @@ function handleSvg(file, report, write, backup) {
   const total = hits + comments;
   if (!total) return;
   if (!write) {
-    addFinding(report, "warn", "svg-metadata", "embedded svg metadata/xmp/comments present", total);
+    report.changed = true;
+    addFinding(report, "fixed", "svg-metadata", "embedded svg metadata/xmp/comments present", total);
     return;
   }
   const cleaned = data.replace(SVG_METADATA, "").replace(SVG_XMP, "").replace(SVG_COMMENT, "");
@@ -96,7 +97,8 @@ function handleBinary(file, report, write, backup, suffix, stripIcc) {
   const { cleaned, stripped } = result;
   if (!stripped) return;
   if (!write) {
-    addFinding(report, "warn", "raster", "embedded metadata present (exif/xmp/icc/c2pa)", stripped);
+    report.changed = true;
+    addFinding(report, "fixed", "raster", "embedded metadata present (exif/xmp/icc/c2pa)", stripped);
     return;
   }
   if (isSymlink(file)) {

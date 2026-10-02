@@ -16,10 +16,10 @@ const DEFAULTS = {
   backup: true,
   custom_banned_phrases: [],
   ignore_phrases: [],
-  layers: ["characters", "homoglyphs", "typography", "voice"],
+  layers: ["entities", "characters", "homoglyphs", "typography", "voice", "artifacts"],
   text_extensions: [".md", ".mdx", ".txt", ".html", ".htm", ".markdown"],
-  image_extensions: [".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".tif", ".tiff"],
-  document_extensions: [".docx", ".odt"],
+  image_extensions: [".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".tif", ".tiff", ".heic", ".heif", ".avif"],
+  document_extensions: [".docx", ".odt", ".pptx", ".xlsx", ".odp", ".ods", ".pdf"],
   exclude: ["node_modules", ".git", "dist", "build", ".next", ".venv", "__pycache__"],
 };
 

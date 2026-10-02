@@ -14,7 +14,28 @@ const ODT_RULES = [
   { part: "meta.xml", remove: ["creator", "initial-creator", "generator", "editing-duration", "printed-by"] },
   { part: "content.xml", empty: ["creator"] },
 ];
-const RULES = { ".docx": DOCX_RULES, ".odt": ODT_RULES };
+const PPTX_RULES = [
+  { part: "docProps/core.xml", remove: ["creator", "lastModifiedBy"] },
+  { part: "docProps/app.xml", remove: ["Application", "AppVersion", "Company", "Manager", "Template", "TotalTime"] },
+  { part: "ppt/commentAuthors.xml", blankAttributes: ["name", "initials"] },
+  { part: "ppt/authors.xml", blankAttributes: ["name", "initials", "userId", "providerId"] },
+];
+const XLSX_RULES = [
+  { part: "docProps/core.xml", remove: ["creator", "lastModifiedBy"] },
+  { part: "docProps/app.xml", remove: ["Application", "AppVersion", "Company", "Manager", "Template", "TotalTime"] },
+  { part: "xl/*.xml", empty: ["author"] },
+  { part: "xl/persons/person.xml", blankAttributes: ["displayName", "userId", "providerId"] },
+];
+const RULES = {
+  ".docx": DOCX_RULES,
+  ".pptx": PPTX_RULES,
+  ".xlsx": XLSX_RULES,
+  ".odt": ODT_RULES,
+  ".odp": ODT_RULES,
+  ".ods": ODT_RULES,
+};
+const PDF_SUFFIXES = new Set([".pdf"]);
+const PDF_FIELDS = ["/Author", "/Creator", "/Producer", "<x:xmpmeta", "/C2PA_Manifest"];
 
 function partMatches(pattern, name) {
   if (pattern.endsWith("/*.xml")) {
@@ -99,7 +120,10 @@ function processFile(file, write, backup) {
   const suffix = path.extname(file).toLowerCase();
   const report = emptyReport(file);
   const rules = RULES[suffix];
-  if (!rules) return report;
+  if (!rules) {
+    if (PDF_SUFFIXES.has(suffix)) reportPdf(file, report);
+    return report;
+  }
   const data = fs.readFileSync(file);
   const result = cleanZip(data, rules);
   if (result === null) {
@@ -109,7 +133,8 @@ function processFile(file, write, backup) {
   const { data: newData, stripped } = result;
   if (!stripped) return report;
   if (!write) {
-    addFinding(report, "warn", "office", "embedded author/application metadata present", stripped);
+    report.changed = true;
+    addFinding(report, "fixed", "office", "embedded author/application metadata present", stripped);
     return report;
   }
   if (isSymlink(file)) {
@@ -121,6 +146,30 @@ function processFile(file, write, backup) {
   writeAtomic(file, newData);
   addFinding(report, "fixed", "office", "stripped author/application metadata (lossless, container-level)", stripped);
   return report;
+}
+
+function countOccurrences(data, needle) {
+  let count = 0;
+  let index = data.indexOf(needle);
+  while (index !== -1) {
+    count += 1;
+    index = data.indexOf(needle, index + needle.length);
+  }
+  return count;
+}
+
+function reportPdf(file, report) {
+  const data = fs.readFileSync(file);
+  if (data.subarray(0, 4).toString("latin1") !== "%PDF") {
+    addFinding(report, "warn", "pdf", "could not parse (file left untouched)", 1);
+    return;
+  }
+  const hits = PDF_FIELDS.reduce((sum, field) => sum + countOccurrences(data, Buffer.from(field, "latin1")), 0);
+  if (hits) {
+    addFinding(report, "warn", "pdf", "pdf metadata present (author/creator/producer/xmp), not stripped: lossless pdf rewriting is not supported, use exiftool or qpdf", hits);
+  } else {
+    addFinding(report, "warn", "pdf", "lossless metadata stripping not supported for this format (file left untouched)", 1);
+  }
 }
 
 const EOCD_SIGNATURE = 0x06054b50;
@@ -359,9 +408,7 @@ function writeZip(records) {
   let pos = 0;
   for (const record of ordered) {
     offsets.push(pos);
-    const header = record.modified
-      ? patchHeader(record.header, record.crc, record.csize, record.usize, record.method)
-      : record.header;
+    const header = patchHeader(record.header, record.crc, record.csize, record.usize, record.method);
     localParts.push(header, record.compData);
     pos += header.length + record.compData.length;
   }

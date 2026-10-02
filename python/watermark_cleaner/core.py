@@ -2,22 +2,25 @@ import re
 
 from .config import DEFAULTS
 from .findings import Report
-from .layers import characters, homoglyphs, typography, voice
+from .layers import artifacts, characters, entities, homoglyphs, typography, voice
 from .rules import load_rules
 
 _LAYERS = {
+    "entities": entities.clean,
     "characters": characters.clean,
     "homoglyphs": homoglyphs.clean,
     "typography": typography.clean,
     "voice": voice.clean,
+    "artifacts": artifacts.clean,
 }
 
-_PROTECT_AWARE = {"typography", "voice"}
+_PROTECT_AWARE = {"entities", "typography", "voice", "artifacts"}
 
 _PROTECTED = re.compile(
     r"\A---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|\Z)"
     r"|```[\s\S]*?(?:```|\Z)"
     r"|~~~[\s\S]*?(?:~~~|\Z)"
+    r"|``[^\r\n]*?``"
     r"|`[^`\r\n]+`"
 )
 

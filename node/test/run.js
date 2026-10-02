@@ -553,8 +553,8 @@ ok("docx inspect mode does not write", () => {
   const original = makeDocx();
   fs.writeFileSync(target, original);
   const report = office.inspectFile(target);
-  assert.strictEqual(report.changed, false);
-  assert.strictEqual(report.counts.warn, 5);
+  assert.strictEqual(report.changed, true);
+  assert.strictEqual(report.counts.fixed, 5);
   assert.ok(fs.readFileSync(target).equals(original));
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -893,8 +893,252 @@ ok("zwj between latin letters is removed, emoji and indic sequences keep it", ()
 ok("deprecated format, annotation and filler characters are removed, separators become spaces", () => {
   assert.strictEqual(clean("a\u206ab\u206fc\ufff9d\ufffae\ufffbf\u3164g\uffa0h").text, "abcdefgh");
   assert.strictEqual(clean("one\u2028two\u2029three\u2800four").text, "one two three four");
-  assert.strictEqual(clean("a\u180bb").text, "a\u180bb");
-  assert.strictEqual(clean("a\u180bb", { strip_variation_selectors: true }).text, "ab");
+  assert.strictEqual(clean("\u1820\u180b\u1821").text, "\u1820\u180b\u1821");
+  assert.strictEqual(clean("a\u180bb").text, "ab");
+  assert.strictEqual(clean("\u1820\u180b\u1821", { strip_variation_selectors: true }).text, "\u1820\u1821");
+});
+
+const { execFileSync, spawnSync } = require("child_process");
+
+const ENGLAND = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+const SCOTLAND = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
+
+ok("subdivision flag emoji survive, other tag characters are removed", () => {
+  const text = `England ${ENGLAND} and Scotland ${SCOTLAND}.`;
+  const result = clean(text);
+  assert.strictEqual(result.text, text);
+  assert.deepStrictEqual(result.report.findings, []);
+  assert.strictEqual(clean("fun\u{E0020}ding and hi\u{E0041}\u{E007F}").text, "funding and hi");
+  assert.strictEqual(clean("\u{1F3F4}\u{E0067}\u{E0062}\u{E0065} text").text, "\u{1F3F4} text");
+});
+
+ok("spaced dash between numbers becomes a hyphen, typographic hyphens become ascii", () => {
+  assert.strictEqual(clean("Open 10 – 20 Uhr, from 1990 — 2000.").text, "Open 10 - 20 Uhr, from 1990 - 2000.");
+  assert.strictEqual(clean("fast — slow").text, "fast, slow");
+  assert.strictEqual(clean("E‑Mail and co‐operate").text, "E-Mail and co-operate");
+});
+
+ok("french narrow no-break spaces before high punctuation are kept", () => {
+  const text = "Il dit : bonjour ! «Oui » et 12 000.";
+  assert.strictEqual(clean(text, { straight_quotes: false }).text, text);
+  assert.strictEqual(clean("hidden mark").text, "hidden mark");
+  assert.strictEqual(clean("Il dit :", { keep_nbsp_in_numbers: false }).text, "Il dit :");
+});
+
+ok("html entities of invisible characters are decoded and removed, code and nbsp are left alone", () => {
+  const text = "<p>Hid&#8203;den &#x200B;more &zwnj;x &shy;y &#65279;z &ZeroWidthSpace;w &nbsp;ok &amp; &lt;</p>";
+  const result = clean(text);
+  assert.strictEqual(result.text, "<p>Hidden more x y z w &nbsp;ok &amp; &lt;</p>");
+  assert.ok(result.report.findings.some((f) => f.message.includes("decoded html entities")));
+  const doc = "Use `&#8203;` or ``&zwnj;`` to insert one.\n\n```html\n&#8203;\n```\n";
+  assert.strictEqual(clean(doc).text, doc);
+  assert.strictEqual(clean("\u{1F468}&zwj;\u{1F4BB}").text, "\u{1F468}‍\u{1F4BB}");
+  assert.strictEqual(clean("wa&zwj;ter").text, "water");
+});
+
+ok("private use characters, noncharacters and hangul fillers are removed", () => {
+  const result = clean("Paris is the capitalciteturn0search0.");
+  assert.strictEqual(result.text, "Paris is the capital.");
+  assert.ok(result.report.findings.some((f) => f.message.includes("private use")));
+  assert.strictEqual(clean("a\u{F0000}b\u{10FFFD}c﷐d￾e").text, "abcde");
+  assert.strictEqual(clean("AᅟBᅠCㅤDﾠE").text, "ABCDE");
+});
+
+ok("grapheme joiner next to hebrew and braille blank inside braille are kept", () => {
+  assert.strictEqual(clean("ב͏ְ").text, "ב͏ְ");
+  assert.strictEqual(clean("a͏b").text, "ab");
+  assert.strictEqual(clean("⠓⠀⠑").text, "⠓⠀⠑");
+  assert.strictEqual(clean("a⠀b").text, "a b");
+});
+
+ok("variation selectors are removed only when their base cannot carry one", () => {
+  const result = clean("Hello︁︂\u{E0100} world️");
+  assert.strictEqual(result.text, "Hello world");
+  assert.ok(result.report.findings.some((f) => f.kind === "variation-selector"));
+  for (const text of ["❤️", "1️⃣", "辻\u{E0100}", "©️", "↔︎", "ᠠ᠋"]) {
+    assert.strictEqual(clean(text).text, text);
+  }
+  assert.strictEqual(clean("❤️︁︂").text, "❤️");
+  assert.strictEqual(clean("❤️", { strip_variation_selectors: true }).text, "❤");
+});
+
+ok("assistant copy artifacts and tracking parameters are removed, uploads only warn", () => {
+  const text =
+    "Fact citeturn0search0 and [cite: 1, 2] and [span_1](start_span)x[span_1](end_span) " +
+    "and 【4†source】 see https://x.io/a?utm_source=chatgpt.com&b=1 " +
+    "and https://x.io/b?c=2&utm_source=openai and https://x.io/c?utm_source=perplexity done.";
+  const result = clean(text);
+  assert.strictEqual(result.text, "Fact  and  and x and  see https://x.io/a?b=1 and https://x.io/b?c=2 and https://x.io/c done.");
+  const artifact = result.report.findings.find((f) => f.layer === "artifacts");
+  assert.strictEqual(artifact.severity, "fixed");
+  assert.ok(artifact.examples.includes("utm_source-tracking"));
+  assert.strictEqual(clean("https://x.io/?utm_source=newsletter").text, "https://x.io/?utm_source=newsletter");
+  const upload = "see https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/x.pdf";
+  const uploadResult = clean(upload);
+  assert.strictEqual(uploadResult.text, upload);
+  assert.deepStrictEqual(uploadResult.report.findings.filter((f) => f.layer === "artifacts").map((f) => f.severity), ["warn"]);
+  assert.strictEqual(clean("`citeturn0search0` stays").text, "`citeturn0search0` stays");
+});
+
+ok("double backtick code spans are protected", () => {
+  assert.strictEqual(clean("Use `` a ` b “x” `` here “y”").text, 'Use `` a ` b “x” `` here "y"');
+});
+
+ok("chat residue blocks, participial tails and copula avoidance warn, german rules work", () => {
+  const residue = clean("Certainly! Here's the plan. I hope this helps! Let me know if you need more.").report;
+  assert.strictEqual(residue.findings.find((f) => f.kind === "banned-phrase").count, 3);
+  const shapes = clean("We shipped it, highlighting the importance of focus. The library serves as a bridge.").report;
+  const warn = shapes.findings.find((f) => f.kind === "sentence-shape" && f.severity === "warn");
+  assert.deepStrictEqual([...warn.examples].sort(), ["copula-avoidance", "participial-tail"]);
+  const german = clean("In der heutigen digitalen Welt ist das essenziell. Es geht nicht um Tools. Es geht um Haltung.").report;
+  const kinds = new Set(german.findings.map((f) => `${f.kind}:${f.severity}`));
+  assert.ok(kinds.has("banned-phrase:error"));
+  assert.ok(kinds.has("sentence-shape:error"));
+  assert.ok(kinds.has("lexicon:warn"));
+});
+
+ok("every sentence shape matches its own example", () => {
+  const { loadRules } = require("../src/rules");
+  for (const shape of loadRules().phrases.sentence_shapes) {
+    assert.ok(new RegExp(shape.pattern, "i").test(shape.example), shape.id);
+  }
+});
+
+const PPTX_CORE = '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>T</dc:title><dc:creator>Jane</dc:creator><cp:lastModifiedBy>Jane</cp:lastModifiedBy></cp:coreProperties>';
+
+ok("pptx comment authors are blanked, slides untouched", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "deck.pptx");
+  fs.writeFileSync(target, buildZip([
+    { name: "[Content_Types].xml", content: "<Types/>" },
+    { name: "docProps/core.xml", content: PPTX_CORE },
+    { name: "docProps/app.xml", content: "<Properties><Application>Microsoft Office PowerPoint</Application><Company>Acme</Company></Properties>" },
+    { name: "ppt/commentAuthors.xml", content: '<p:cmAuthorLst xmlns:p="p"><p:cmAuthor id="0" name="Jane Doe" initials="JD" lastIdx="1" clrIdx="0"/></p:cmAuthorLst>' },
+    { name: "ppt/authors.xml", content: '<p188:authorLst xmlns:p188="p"><p188:author id="{1}" name="Jane Doe" initials="JD" userId="jane@acme" providerId="AD"/></p188:authorLst>' },
+    { name: "ppt/slides/slide1.xml", content: "<p:sld>Hello</p:sld>" },
+  ]));
+  const report = office.cleanFile(target, true, false);
+  assert.strictEqual(report.changed, true);
+  const { entries } = readZipEntries(fs.readFileSync(target));
+  assert.ok(!entries["docProps/core.xml"].content.includes("Jane"));
+  assert.ok(!entries["docProps/app.xml"].content.includes("PowerPoint"));
+  assert.ok(entries["ppt/commentAuthors.xml"].content.includes('name="" initials=""'));
+  assert.ok(entries["ppt/authors.xml"].content.includes('userId="" providerId=""'));
+  assert.strictEqual(entries["ppt/slides/slide1.xml"].content, "<p:sld>Hello</p:sld>");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("xlsx comment authors and persons are blanked", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "sheet.xlsx");
+  fs.writeFileSync(target, buildZip([
+    { name: "[Content_Types].xml", content: "<Types/>" },
+    { name: "docProps/core.xml", content: PPTX_CORE },
+    { name: "xl/workbook.xml", content: "<workbook/>" },
+    { name: "xl/comments1.xml", content: "<comments><authors><author>Jane Doe</author></authors><commentList/></comments>" },
+    { name: "xl/persons/person.xml", content: '<personList><person displayName="Jane Doe" id="{1}" userId="jane@acme" providerId="AD"/></personList>' },
+  ]));
+  office.cleanFile(target, true, false);
+  const { entries } = readZipEntries(fs.readFileSync(target));
+  assert.ok(entries["xl/comments1.xml"].content.includes("<author></author>"));
+  assert.ok(entries["xl/persons/person.xml"].content.includes('displayName=""'));
+  assert.strictEqual(entries["xl/workbook.xml"].content, "<workbook/>");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("odp and ods use the opendocument rules", () => {
+  for (const name of ["deck.odp", "sheet.ods"]) {
+    const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+    const target = nodePath.join(tmp, name);
+    fs.writeFileSync(target, buildZip([
+      { name: "mimetype", content: "application/vnd.oasis.opendocument.presentation", method: 0 },
+      { name: "meta.xml", content: '<office:document-meta xmlns:meta="m" xmlns:dc="dc"><office:meta><meta:generator>Impress</meta:generator><dc:creator>Jane</dc:creator></office:meta></office:document-meta>' },
+      { name: "content.xml", content: "<office:document-content>Hello</office:document-content>" },
+    ]));
+    const report = office.cleanFile(target, true, false);
+    assert.strictEqual(report.changed, true, name);
+    const { entries } = readZipEntries(fs.readFileSync(target));
+    assert.ok(!entries["meta.xml"].content.includes("Jane"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+ok("streamed zip entries get consistent local headers after cleaning", () => {
+  const streamed = fs.readFileSync(nodePath.join(__dirname, "..", "..", "tests", "fixtures", "parity", "streamed.docx"));
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "streamed.docx");
+  fs.writeFileSync(target, streamed);
+  office.cleanFile(target, true, false);
+  const cleaned = fs.readFileSync(target);
+  let offset = 0;
+  let entries = 0;
+  while (cleaned.readUInt32LE(offset) === 0x04034b50) {
+    const flags = cleaned.readUInt16LE(offset + 6);
+    const csize = cleaned.readUInt32LE(offset + 18);
+    const usize = cleaned.readUInt32LE(offset + 22);
+    assert.strictEqual(flags & 0x08, 0);
+    assert.ok(csize > 0 && usize > 0);
+    offset += 30 + cleaned.readUInt16LE(offset + 26) + cleaned.readUInt16LE(offset + 28) + csize;
+    entries += 1;
+  }
+  assert.strictEqual(entries, 3);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+ok("pdf is reported, not rewritten, heic is reported as unsupported, inspect counts as would change", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const pdf = nodePath.join(tmp, "scan.pdf");
+  const pdfData = Buffer.from("%PDF-1.4\n1 0 obj<</Author(Jane)/Producer(Acrobat)>>endobj\ntrailer<</Info 1 0 R>>\n%%EOF\n", "latin1");
+  fs.writeFileSync(pdf, pdfData);
+  const pdfReport = office.cleanFile(pdf, true, false);
+  assert.strictEqual(pdfReport.changed, false);
+  assert.ok(fs.readFileSync(pdf).equals(pdfData));
+  assert.strictEqual(pdfReport.findings[0].severity, "warn");
+  assert.ok(pdfReport.findings[0].message.includes("pdf metadata present"));
+  assert.strictEqual(pdfReport.findings[0].count, 2);
+  const heic = nodePath.join(tmp, "photo.heic");
+  fs.writeFileSync(heic, Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]));
+  const heicReport = cleanImageFile(heic, true, false, false);
+  assert.strictEqual(heicReport.changed, false);
+  assert.ok(heicReport.findings[0].message.includes("not supported"));
+  const deck = nodePath.join(tmp, "deck.pptx");
+  fs.writeFileSync(deck, buildZip([{ name: "docProps/core.xml", content: PPTX_CORE }, { name: "ppt/slides/slide1.xml", content: "<p:sld/>" }]));
+  const inspect = office.inspectFile(deck);
+  assert.strictEqual(inspect.changed, true);
+  assert.strictEqual(inspect.findings[0].severity, "fixed");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+const CLI = nodePath.join(__dirname, "..", "bin", "watermark-cleaner.js");
+
+function runCli(args, input) {
+  return spawnSync(process.execPath, [CLI, ...args], { input, cwd: nodePath.join(__dirname, "..", "..") });
+}
+
+ok("fix from stdin writes cleaned text to stdout and the report to stderr", () => {
+  const result = runCli(["fix", "-"], Buffer.from("Hel​lo “world”\n", "utf-8"));
+  assert.strictEqual(result.status, 0);
+  assert.strictEqual(result.stdout.toString("utf-8"), 'Hello "world"\n');
+  assert.ok(result.stderr.toString("utf-8").includes("<stdin>"));
+  assert.ok(result.stderr.toString("utf-8").includes("1 changed"));
+});
+
+ok("check from stdin reports on stdout, stdin cannot be mixed with paths", () => {
+  const result = runCli(["check", "-"], Buffer.from("in today's fast-paced world\n", "utf-8"));
+  assert.strictEqual(result.status, 1);
+  assert.ok(result.stdout.toString("utf-8").includes("ai phrases present"));
+  assert.strictEqual(runCli(["fix", "-", "README.md"], Buffer.from("x")).status, 2);
+});
+
+ok("check --strict fails when anything would change", () => {
+  const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "watermark-cleaner-"));
+  const target = nodePath.join(tmp, "a.md");
+  fs.writeFileSync(target, "te​st\n");
+  assert.strictEqual(runCli(["check", target, "--quiet"]).status, 0);
+  assert.strictEqual(runCli(["check", target, "--quiet", "--strict"]).status, 1);
+  fs.writeFileSync(target, "clean\n");
+  assert.strictEqual(runCli(["check", target, "--quiet", "--strict"]).status, 0);
+  fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 if (failed) {

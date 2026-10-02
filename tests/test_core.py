@@ -99,11 +99,13 @@ class HiddenCharacterCoverage(unittest.TestCase):
         cleaned, _ = clean("one\u2028two\u2029three\u2800four")
         self.assertEqual(cleaned, "one two three four")
 
-    def test_mongolian_selectors_only_stripped_when_aggressive(self):
-        kept, _ = clean("a\u180bb")
-        self.assertEqual(kept, "a\u180bb")
-        stripped, _ = clean("a\u180bb", strip_variation_selectors=True)
-        self.assertEqual(stripped, "ab")
+    def test_mongolian_selectors_follow_their_base_character(self):
+        kept, _ = clean("\u1820\u180b\u1821")
+        self.assertEqual(kept, "\u1820\u180b\u1821")
+        orphan, _ = clean("a\u180bb")
+        self.assertEqual(orphan, "ab")
+        stripped, _ = clean("\u1820\u180b\u1821", strip_variation_selectors=True)
+        self.assertEqual(stripped, "\u1820\u1821")
 
 
 class ScriptSafety(unittest.TestCase):

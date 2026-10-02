@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "watermark-cleaner"
-version = "0.2.1"
+version = "0.3.0"
 description = "Remove AI text artifacts, AI phrases and file metadata before you publish. Detects and strips invisible unicode characters, losslessly cleans image metadata."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -18,6 +18,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Environment :: Console",

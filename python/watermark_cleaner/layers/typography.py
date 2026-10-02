@@ -2,6 +2,7 @@ import re
 
 from ..findings import Finding
 
+_DASH_RANGE = re.compile(r"(?<=\d[ \t])[—–‒―](?=[ \t]\d)")
 _DASH_SPACED = re.compile(r"[ \t]+[—–‒―][ \t]+")
 _DASH_ANY = re.compile(r"[—–‒―]")
 _DOT_RUN = re.compile(r"\.{4,}")
@@ -37,9 +38,10 @@ def clean(text, config, rules):
         policy.update(config.get("dash_policy") or {})
         spaced = policy.get("spaced_replacement", ", ")
         unspaced = policy.get("unspaced_replacement", "-")
+        text, n_range = _DASH_RANGE.subn("-", text)
         text, n_spaced = _DASH_SPACED.subn(spaced, text)
         text, n_unspaced = _DASH_ANY.subn(unspaced, text)
-        total = n_spaced + n_unspaced
+        total = n_range + n_spaced + n_unspaced
         if total:
             findings.append(
                 Finding("typography", "dash", "fixed", "replaced em/en dash per policy", total)

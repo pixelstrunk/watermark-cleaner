@@ -19,7 +19,7 @@ _WEBP_VP8X_CLEAR_FLAGS = 0x08 | 0x04
 _WEBP_VP8X_ICC_FLAG = 0x20
 
 _LOSSLESS_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
-_UNSUPPORTED_SUFFIXES = (".gif", ".tif", ".tiff")
+_UNSUPPORTED_SUFFIXES = (".gif", ".tif", ".tiff", ".heic", ".heif", ".avif")
 
 
 def inspect_file(path, strip_icc=False):
@@ -56,8 +56,9 @@ def _handle_svg(path, report, write, backup):
     if not total:
         return
     if not write:
+        report.changed = True
         report.findings.append(
-            Finding("metadata", "svg-metadata", "warn", "embedded svg metadata/xmp/comments present", total)
+            Finding("metadata", "svg-metadata", "fixed", "embedded svg metadata/xmp/comments present", total)
         )
         return
     cleaned = _SVG_COMMENT.sub("", _SVG_XMP.sub("", _SVG_METADATA.sub("", data)))
@@ -92,8 +93,9 @@ def _handle_binary(path, report, write, backup, suffix, strip_icc):
     if not stripped:
         return
     if not write:
+        report.changed = True
         report.findings.append(
-            Finding("metadata", "raster", "warn", "embedded metadata present (exif/xmp/icc/c2pa)", stripped)
+            Finding("metadata", "raster", "fixed", "embedded metadata present (exif/xmp/icc/c2pa)", stripped)
         )
         return
     if is_symlink(path):

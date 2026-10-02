@@ -187,9 +187,9 @@ class OfficeMetadataTest(unittest.TestCase):
         make_docx(p)
         original_bytes = p.read_bytes()
         report = inspect_file(p)
-        self.assertFalse(report.changed)
+        self.assertTrue(report.changed)
         counts = report.counts()
-        self.assertEqual(counts["warn"], 5)
+        self.assertEqual(counts["fixed"], 5)
         self.assertEqual(p.read_bytes(), original_bytes)
 
     def test_corrupt_zip_reports_warning_and_leaves_file_untouched(self):

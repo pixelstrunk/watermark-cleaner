@@ -3,7 +3,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-_RULE_FILES = ["characters", "typography", "phrases", "homoglyphs"]
+_RULE_FILES = ["characters", "typography", "phrases", "homoglyphs", "artifacts"]
 
 
 def _candidate_dirs():

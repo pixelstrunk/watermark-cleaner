@@ -19,9 +19,30 @@ _ODT_RULES = (
     {"part": "meta.xml", "remove": ("creator", "initial-creator", "generator", "editing-duration", "printed-by")},
     {"part": "content.xml", "empty": ("creator",)},
 )
-_RULES = {".docx": _DOCX_RULES, ".odt": _ODT_RULES}
+_PPTX_RULES = (
+    {"part": "docProps/core.xml", "remove": ("creator", "lastModifiedBy")},
+    {"part": "docProps/app.xml", "remove": ("Application", "AppVersion", "Company", "Manager", "Template", "TotalTime")},
+    {"part": "ppt/commentAuthors.xml", "blank_attributes": ("name", "initials")},
+    {"part": "ppt/authors.xml", "blank_attributes": ("name", "initials", "userId", "providerId")},
+)
+_XLSX_RULES = (
+    {"part": "docProps/core.xml", "remove": ("creator", "lastModifiedBy")},
+    {"part": "docProps/app.xml", "remove": ("Application", "AppVersion", "Company", "Manager", "Template", "TotalTime")},
+    {"part": "xl/*.xml", "empty": ("author",)},
+    {"part": "xl/persons/person.xml", "blank_attributes": ("displayName", "userId", "providerId")},
+)
+_RULES = {
+    ".docx": _DOCX_RULES,
+    ".pptx": _PPTX_RULES,
+    ".xlsx": _XLSX_RULES,
+    ".odt": _ODT_RULES,
+    ".odp": _ODT_RULES,
+    ".ods": _ODT_RULES,
+}
 
 _SUPPORTED_SUFFIXES = tuple(_RULES)
+_PDF_SUFFIXES = (".pdf",)
+_PDF_FIELDS = (b"/Author", b"/Creator", b"/Producer", b"<x:xmpmeta", b"/C2PA_Manifest")
 
 _LOCAL_HEADER_SIZE = 30
 _LOCAL_HEADER_SIGNATURE = b"PK\x03\x04"
@@ -102,6 +123,8 @@ def _process(path, write, backup):
     report = Report(path=str(path))
     rules = _RULES.get(suffix)
     if rules is None:
+        if suffix in _PDF_SUFFIXES:
+            _report_pdf(path, report)
         return report
     data = Path(path).read_bytes()
     result = _clean_zip(data, rules)
@@ -112,7 +135,8 @@ def _process(path, write, backup):
     if not stripped:
         return report
     if not write:
-        report.findings.append(Finding("metadata", "office", "warn", "embedded author/application metadata present", stripped))
+        report.changed = True
+        report.findings.append(Finding("metadata", "office", "fixed", "embedded author/application metadata present", stripped))
         return report
     if is_symlink(path):
         report.findings.append(Finding("io", "write", "warn", "refused to write through symlink", 1))
@@ -125,6 +149,28 @@ def _process(path, write, backup):
         Finding("metadata", "office", "fixed", "stripped author/application metadata (lossless, container-level)", stripped)
     )
     return report
+
+
+def _report_pdf(path, report):
+    data = Path(path).read_bytes()
+    if not data.startswith(b"%PDF"):
+        report.findings.append(Finding("metadata", "pdf", "warn", "could not parse (file left untouched)", 1))
+        return
+    hits = sum(data.count(field) for field in _PDF_FIELDS)
+    if hits:
+        report.findings.append(
+            Finding(
+                "metadata",
+                "pdf",
+                "warn",
+                "pdf metadata present (author/creator/producer/xmp), not stripped: lossless pdf rewriting is not supported, use exiftool or qpdf",
+                hits,
+            )
+        )
+    else:
+        report.findings.append(
+            Finding("metadata", "pdf", "warn", "lossless metadata stripping not supported for this format (file left untouched)", 1)
+        )
 
 
 def _clean_zip(data, rules):
@@ -272,7 +318,7 @@ def _write_zip(records):
     offsets = []
     for info, header_bytes, comp_data, crc, csize, usize, method, modified in ordered:
         offsets.append(len(out))
-        out += _patch_header(header_bytes, crc, csize, usize, method) if modified else header_bytes
+        out += _patch_header(header_bytes, crc, csize, usize, method)
         out += comp_data
     central = bytearray()
     for (info, header_bytes, comp_data, crc, csize, usize, method, modified), offset in zip(ordered, offsets):

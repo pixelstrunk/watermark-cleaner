@@ -2,6 +2,10 @@
 const { loadConfig, applyAggressive, ConfigError } = require("../src/config");
 const { run } = require("../src/runner");
 const { renderReport, renderSummary, serializeReport } = require("../src/report");
+const { cleanText } = require("../src/core");
+const { loadRules } = require("../src/rules");
+
+const STDIN = "-";
 
 const VALUE_FLAGS = new Set(["config", "source-lang", "pivot-lang"]);
 const KNOWN_FLAGS = {
@@ -40,34 +44,80 @@ function parseArgs(argv, known) {
 }
 
 function usage() {
-  console.log("usage: watermark-cleaner <check|fix|rewrite> [paths...]");
+  console.log("usage: watermark-cleaner <check|fix|rewrite> [paths...]   (use - to read stdin)");
   console.log("  check|fix  [--json] [--no-voice] [--aggressive] [--no-backup] [--quiet] [--strict] [--config <file>]");
   console.log("  rewrite    [--source-lang <auto>] [--pivot-lang EN] [--write] [--config <file>]  (opt-in, sends text to deepl)");
   console.log("  --version  print the version");
 }
 
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+function scanStdin(config, write) {
+  const raw = require("fs").readFileSync(0);
+  let original;
+  try {
+    original = utf8Decoder.decode(raw);
+  } catch (error) {
+    const report = {
+      path: "<stdin>",
+      findings: [{ layer: "io", kind: "read", severity: "warn", message: "skipped (not utf-8 text)", count: 1, examples: [] }],
+      changed: false,
+      counts: { fixed: 0, warn: 1, error: 0 },
+      has_errors: false,
+    };
+    return { reports: [report], output: raw };
+  }
+  const { text, report } = cleanText(original, config, loadRules(), "<stdin>");
+  return { reports: [report], output: write ? Buffer.from(text, "utf-8") : raw };
+}
+
+function printReports(reports, args, write, stream) {
+  const print = (line) => stream.write(`${line}\n`);
+  if (args.flags.json) {
+    print(JSON.stringify({ mode: write ? "fix" : "check", summary: renderSummary(reports, write), reports: reports.map(serializeReport) }, null, 2));
+    return;
+  }
+  if (!args.flags.quiet) {
+    for (const report of reports) if (report.findings.length) print(renderReport(report, write));
+  }
+  print("");
+  print(renderSummary(reports, write));
+}
+
+function exitCode(reports, args, write) {
+  const strict = Boolean(args.flags.strict);
+  const blocking = reports.some((r) => r.has_errors);
+  if (blocking && (!write || strict)) return 1;
+  if (strict && !write && reports.some((r) => r.changed)) return 1;
+  return 0;
+}
+
 function runScan(command, args) {
   const paths = args.paths.length ? args.paths : ["."];
-  let config = loadConfig(args.flags.config, paths[0]);
+  const configStart = paths[0] === STDIN ? "." : paths[0];
+  let config = loadConfig(args.flags.config, configStart);
   if (args.flags["no-voice"]) config.voice = false;
   if (args.flags.aggressive) config = applyAggressive(config);
   if (args.flags["no-backup"]) config.backup = false;
 
   const write = command === "fix";
-  const reports = run(paths, config, write);
-
-  if (args.flags.json) {
-    console.log(JSON.stringify({ mode: command, summary: renderSummary(reports, write), reports: reports.map(serializeReport) }, null, 2));
-  } else {
-    if (!args.flags.quiet) {
-      for (const report of reports) if (report.findings.length) console.log(renderReport(report, write));
+  if (paths.length === 1 && paths[0] === STDIN) {
+    const { reports, output } = scanStdin(config, write);
+    if (write) {
+      process.stdout.write(output);
+      printReports(reports, args, write, process.stderr);
+    } else {
+      printReports(reports, args, write, process.stdout);
     }
-    console.log("");
-    console.log(renderSummary(reports, write));
+    return exitCode(reports, args, write);
   }
-
-  const blocking = reports.some((r) => r.has_errors);
-  return blocking && (!write || args.flags.strict) ? 1 : 0;
+  if (paths.includes(STDIN)) {
+    console.error("stdin (-) cannot be combined with file paths");
+    return 2;
+  }
+  const reports = run(paths, config, write);
+  printReports(reports, args, write, process.stdout);
+  return exitCode(reports, args, write);
 }
 
 async function runRewrite(args) {

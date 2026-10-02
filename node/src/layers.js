@@ -15,30 +15,21 @@ function buildRemoval(rules, config) {
     removal.add(code);
     names.set(code, entry.name);
   }
-  for (const entry of chars.remove_ranges) {
-    for (let code = hex(entry.from); code <= hex(entry.to); code += 1) {
-      removal.add(code);
-      names.set(code, entry.name);
-    }
-  }
+  const ranges = chars.remove_ranges.map((e) => [hex(e.from), hex(e.to), e.name]);
   if (config.strip_variation_selectors) {
     const vs = chars.variation_selectors;
-    for (let code = hex(vs.from); code <= hex(vs.to); code += 1) {
-      removal.add(code);
-      names.set(code, "variation selector");
-    }
-    for (let code = hex(vs.supplementary_from); code <= hex(vs.supplementary_to); code += 1) {
-      removal.add(code);
-      names.set(code, "variation selector");
-    }
-    if (vs.mongolian_from) {
-      for (let code = hex(vs.mongolian_from); code <= hex(vs.mongolian_to); code += 1) {
-        removal.add(code);
-        names.set(code, "variation selector");
-      }
-    }
+    ranges.push([hex(vs.from), hex(vs.to), "variation selector"]);
+    ranges.push([hex(vs.supplementary_from), hex(vs.supplementary_to), "variation selector"]);
+    if (vs.mongolian_from) ranges.push([hex(vs.mongolian_from), hex(vs.mongolian_to), "variation selector"]);
   }
-  return { removal, names };
+  return { removal, ranges, names };
+}
+
+function rangeName(cp, ranges) {
+  for (const [start, end, name] of ranges) {
+    if (cp >= start && cp <= end) return name;
+  }
+  return null;
 }
 
 function isDigit(cp) {
@@ -46,15 +37,20 @@ function isDigit(cp) {
 }
 
 const LATIN_LETTER_RANGES = [[0x41, 0x5a], [0x61, 0x7a], [0xc0, 0xd6], [0xd8, 0xf6], [0xf8, 0x24f]];
+const ALPHABETIC_BASE_LIMIT = 0x2000;
+const WHITESPACE = new Set([0x20, 0x09, 0x0d, 0x0a, 0x0c, 0x0b]);
+const LETTER = /^\p{L}$/u;
 
 function isLetter(cp) {
   return cp >= 0 && inRanges(cp, LATIN_LETTER_RANGES);
 }
 
-function guardedSpace(points, i) {
+function guardedSpace(points, i, punctuationGuard) {
   const prev = i > 0 ? points[i - 1] : -1;
   const next = i + 1 < points.length ? points[i + 1] : -1;
   if (isDigit(prev) || isDigit(next)) return true;
+  if (next >= 0 && punctuationGuard.before.has(next)) return true;
+  if (prev >= 0 && punctuationGuard.after.has(prev)) return true;
   if (prev !== 0x2e || i < 2 || !isLetter(next)) return false;
   const beforeDot = points[i - 2];
   if (isDigit(beforeDot)) return true;
@@ -89,51 +85,121 @@ function inRanges(cp, ranges) {
   return ranges.some(([start, end]) => cp >= start && cp <= end);
 }
 
+function flagSequenceIndices(points, chars) {
+  const base = hex(chars.flag_sequence_base || "1F3F4");
+  const tags = toRanges(chars.flag_sequence_tags);
+  const cancel = hex(chars.flag_sequence_cancel || "E007F");
+  const kept = new Set();
+  let i = 0;
+  while (i < points.length) {
+    if (points[i] !== base) {
+      i += 1;
+      continue;
+    }
+    let end = i + 1;
+    while (end < points.length && inRanges(points[end], tags)) end += 1;
+    const letters = end - i - 1;
+    if (letters >= 3 && letters <= 6 && end < points.length && points[end] === cancel) {
+      for (let k = i + 1; k <= end; k += 1) kept.add(k);
+      i = end + 1;
+    } else {
+      i += 1;
+    }
+  }
+  return kept;
+}
+
+function variationPolicy(chars) {
+  const vs = chars.variation_selectors;
+  const basic = [hex(vs.from), hex(vs.to)];
+  const supplementary = [hex(vs.supplementary_from), hex(vs.supplementary_to)];
+  const mongolian = vs.mongolian_from ? [hex(vs.mongolian_from), hex(vs.mongolian_to)] : null;
+  const ideographic = toRanges(vs.ideographic_base_ranges);
+  const mongolianBase = vs.mongolian_base_range ? [hex(vs.mongolian_base_range.from), hex(vs.mongolian_base_range.to)] : null;
+  const within = (cp, range) => range !== null && cp >= range[0] && cp <= range[1];
+  const isSelector = (cp) => within(cp, basic) || within(cp, supplementary) || within(cp, mongolian);
+  const isAlphabeticBase = (cp) => cp < ALPHABETIC_BASE_LIMIT && LETTER.test(String.fromCodePoint(cp));
+  const isOrphan = (points, i) => {
+    const cp = points[i];
+    if (i === 0) return true;
+    const prev = points[i - 1];
+    if (WHITESPACE.has(prev) || isSelector(prev)) return true;
+    if (within(cp, supplementary)) return !inRanges(prev, ideographic);
+    if (within(cp, mongolian)) return mongolianBase !== null && !within(prev, mongolianBase);
+    return isAlphabeticBase(prev);
+  };
+  return { isSelector, isOrphan };
+}
+
 function cleanCharacters(text, config, rules) {
   const chars = rules.characters;
-  const { removal, names } = buildRemoval(rules, config);
+  const { removal, ranges: removalRanges, names } = buildRemoval(rules, config);
   const { bidi, names: bidiNames } = buildBidi(rules);
   const exotic = new Set(chars.exotic_spaces_to_ascii.map(hex));
   const guards = new Set((chars.number_space_guard || []).map(hex));
   const keepNumbers = config.keep_nbsp_in_numbers !== false;
+  const guardSpec = chars.punctuation_space_guard || { before: [], after: [] };
+  const punctuationGuard = {
+    before: new Set(guardSpec.before.map((c) => c.codePointAt(0))),
+    after: new Set(guardSpec.after.map((c) => c.codePointAt(0))),
+  };
+  const scriptGuards = new Map((chars.exotic_space_script_guards || []).map((e) => [hex(e.cp), [hex(e.keep_adjacent.from), hex(e.keep_adjacent.to)]]));
 
   const zwnj = chars.zwnj ? hex(chars.zwnj.cp) : null;
   const zwnjName = chars.zwnj ? chars.zwnj.name : "zero width non-joiner";
   const zwj = chars.zwj ? hex(chars.zwj.cp) : null;
   const zwjName = chars.zwj ? chars.zwj.name : "zero width joiner";
+  const cgj = chars.cgj ? hex(chars.cgj.cp) : null;
+  const cgjName = chars.cgj ? chars.cgj.name : "combining grapheme joiner";
+  const cgjKeep = toRanges(chars.cgj ? chars.cgj.keep_adjacent_ranges : []);
   const joining = toRanges(chars.joining_script_ranges);
   const emoji = toRanges(chars.emoji_ranges);
   const rtl = toRanges(chars.rtl_ranges);
 
   const points = Array.from(text, (ch) => ch.codePointAt(0));
   const hasRtl = points.some((cp) => inRanges(cp, rtl));
+  const flagKept = flagSequenceIndices(points, chars);
+  const variation = variationPolicy(chars);
+  const stripAllSelectors = Boolean(config.strip_variation_selectors);
   const out = [];
   const removed = new Map();
   let keptBidi = 0;
   let replacedSpaces = 0;
+  let orphanSelectors = 0;
+
+  const neighbours = (i) => [i > 0 ? points[i - 1] : -1, i + 1 < points.length ? points[i + 1] : -1];
+  const count = (cp) => removed.set(cp, (removed.get(cp) || 0) + 1);
 
   for (let i = 0; i < points.length; i += 1) {
     const cp = points[i];
     if (zwnj !== null && cp === zwnj) {
-      const prev = i > 0 ? points[i - 1] : -1;
-      const next = i + 1 < points.length ? points[i + 1] : -1;
+      const [prev, next] = neighbours(i);
       if (inRanges(prev, joining) || inRanges(next, joining)) {
         out.push(String.fromCodePoint(cp));
         continue;
       }
-      removed.set(cp, (removed.get(cp) || 0) + 1);
+      count(cp);
       names.set(cp, zwnjName);
       continue;
     }
     if (zwj !== null && cp === zwj) {
-      const prev = i > 0 ? points[i - 1] : -1;
-      const next = i + 1 < points.length ? points[i + 1] : -1;
-      if ([prev, next].some((neighbour) => inRanges(neighbour, joining) || inRanges(neighbour, emoji))) {
+      const [prev, next] = neighbours(i);
+      if ([prev, next].some((n) => inRanges(n, joining) || inRanges(n, emoji))) {
         out.push(String.fromCodePoint(cp));
         continue;
       }
-      removed.set(cp, (removed.get(cp) || 0) + 1);
+      count(cp);
       names.set(cp, zwjName);
+      continue;
+    }
+    if (cgj !== null && cp === cgj) {
+      const [prev, next] = neighbours(i);
+      if (inRanges(prev, cgjKeep) || inRanges(next, cgjKeep)) {
+        out.push(String.fromCodePoint(cp));
+        continue;
+      }
+      count(cp);
+      names.set(cp, cgjName);
       continue;
     }
     if (bidi.has(cp)) {
@@ -142,18 +208,44 @@ function cleanCharacters(text, config, rules) {
         keptBidi += 1;
         continue;
       }
-      removed.set(cp, (removed.get(cp) || 0) + 1);
+      count(cp);
       names.set(cp, bidiNames.get(cp));
       continue;
     }
+    if (flagKept.has(i)) {
+      out.push(String.fromCodePoint(cp));
+      continue;
+    }
     if (removal.has(cp)) {
-      removed.set(cp, (removed.get(cp) || 0) + 1);
+      count(cp);
+      continue;
+    }
+    const name = rangeName(cp, removalRanges);
+    if (name !== null) {
+      count(cp);
+      names.set(cp, name);
+      continue;
+    }
+    if (!stripAllSelectors && variation.isSelector(cp)) {
+      if (variation.isOrphan(points, i)) {
+        orphanSelectors += 1;
+        continue;
+      }
+      out.push(String.fromCodePoint(cp));
       continue;
     }
     if (exotic.has(cp)) {
-      if (keepNumbers && guards.has(cp) && guardedSpace(points, i)) {
+      if (keepNumbers && guards.has(cp) && guardedSpace(points, i, punctuationGuard)) {
         out.push(String.fromCodePoint(cp));
         continue;
+      }
+      if (scriptGuards.has(cp)) {
+        const [prev, next] = neighbours(i);
+        const [start, end] = scriptGuards.get(cp);
+        if ((prev >= start && prev <= end) || (next >= start && next <= end)) {
+          out.push(String.fromCodePoint(cp));
+          continue;
+        }
       }
       out.push(" ");
       replacedSpaces += 1;
@@ -167,16 +259,41 @@ function cleanCharacters(text, config, rules) {
   if (["NFC", "NFKC", "NFD", "NFKD"].includes(form)) cleaned = cleaned.normalize(form);
 
   const findings = [];
-  for (const [code, count] of [...removed.entries()].sort((a, b) => a[0] - b[0])) {
+  for (const [code, n] of [...removed.entries()].sort((a, b) => a[0] - b[0])) {
     const label = names.get(code) || "invisible character";
-    findings.push(finding("characters", "invisible-character", "fixed", `removed ${label} (U+${code.toString(16).toUpperCase().padStart(4, "0")})`, count));
+    findings.push(finding("characters", "invisible-character", "fixed", `removed ${label} (U+${code.toString(16).toUpperCase().padStart(4, "0")})`, n));
   }
+  if (orphanSelectors) findings.push(finding("characters", "variation-selector", "fixed", "removed variation selector without a base character that supports it (hidden payload)", orphanSelectors));
   if (keptBidi) findings.push(finding("characters", "bidi-control", "warn", "kept bidi control characters (document contains rtl text)", keptBidi));
   if (replacedSpaces) findings.push(finding("characters", "exotic-space", "fixed", "replaced exotic space with normal space", replacedSpaces));
   return { text: cleaned, findings };
 }
 
+const ENTITY = /&(?:#(\d+)|#[xX]([0-9A-Fa-f]+)|([A-Za-z][A-Za-z0-9]*));/g;
+
+function cleanEntities(text, config, rules) {
+  const spec = rules.characters.html_entities;
+  if (!spec || !text.includes("&")) return { text, findings: [] };
+  const named = new Map(Object.entries(spec.named || {}).map(([name, code]) => [name, hex(code)]));
+  const codes = new Set((spec.numeric_codepoints || []).map(hex));
+  const ranges = toRanges(spec.numeric_ranges);
+  let decoded = 0;
+  text = text.replace(ENTITY, (whole, decimal, hexadecimal, name) => {
+    let code;
+    if (name !== undefined) code = named.has(name) ? named.get(name) : null;
+    else code = decimal !== undefined ? parseInt(decimal, 10) : parseInt(hexadecimal, 16);
+    if (code === null || code > 0x10ffff) return whole;
+    if (!codes.has(code) && !inRanges(code, ranges)) return whole;
+    decoded += 1;
+    return String.fromCodePoint(code);
+  });
+  const findings = [];
+  if (decoded) findings.push(finding("entities", "html-entity", "fixed", "decoded html entities of invisible characters (handled by the characters layer)", decoded));
+  return { text, findings };
+}
+
 const DASH_CLASS = "—–‒―";
+const DASH_RANGE = new RegExp(`(?<=\\d[ \\t])[${DASH_CLASS}](?=[ \\t]\\d)`, "g");
 const DASH_SPACED = new RegExp(`[ \\t]+[${DASH_CLASS}][ \\t]+`, "g");
 const DASH_ANY = new RegExp(`[${DASH_CLASS}]`, "g");
 const DOT_RUN = /\.{4,}/g;
@@ -207,11 +324,13 @@ function cleanTypography(text, config, rules) {
     const policy = { ...typo.dash_policy, ...(config.dash_policy || {}) };
     const spaced = policy.spaced_replacement !== undefined ? policy.spaced_replacement : ", ";
     const unspaced = policy.unspaced_replacement !== undefined ? policy.unspaced_replacement : "-";
+    const nRange = countMatches(text, DASH_RANGE);
+    text = text.replace(DASH_RANGE, "-");
     const nSpaced = countMatches(text, DASH_SPACED);
     text = text.replace(DASH_SPACED, spaced);
     const nUnspaced = countMatches(text, DASH_ANY);
     text = text.replace(DASH_ANY, unspaced);
-    const total = nSpaced + nUnspaced;
+    const total = nRange + nSpaced + nUnspaced;
     if (total) findings.push(finding("typography", "dash", "fixed", "replaced em/en dash per policy", total));
   }
 
@@ -435,11 +554,61 @@ function cleanVoice(text, config, rules) {
   return { text, findings };
 }
 
+function trackingRegex(parameter, values) {
+  const alternatives = values.map(escapeRegex).join("|");
+  return cachedRegex(`tracking:${parameter}:${values.join(",")}`, () => new RegExp(`([?&])${escapeRegex(parameter)}=(?:${alternatives})(?=[&\\s)\\]"'>]|$)(&?)`, "g"));
+}
+
+function trackingSub(match, lead, trailingAmpersand) {
+  if (lead === "?") return trailingAmpersand ? "?" : "";
+  return trailingAmpersand ? "&" : "";
+}
+
+function cleanArtifacts(text, config, rules) {
+  const spec = rules.artifacts;
+  if (!spec) return { text, findings: [] };
+  const findings = [];
+  const removed = new Map();
+  for (const entry of spec.remove_patterns || []) {
+    const re = cachedRegex(`artifact:${entry.id}`, () => new RegExp(entry.pattern, "g"));
+    const n = countMatches(text, re);
+    if (n) {
+      text = text.replace(re, "");
+      removed.set(entry.id, n);
+    }
+  }
+  for (const [parameter, values] of Object.entries(spec.url_tracking_params || {})) {
+    const re = trackingRegex(parameter, values);
+    const n = countMatches(text, re);
+    if (n) {
+      text = text.replace(re, trackingSub);
+      removed.set(`${parameter}-tracking`, n);
+    }
+  }
+  if (removed.size) {
+    const total = [...removed.values()].reduce((a, b) => a + b, 0);
+    findings.push(finding("artifacts", "copy-artifact", "fixed", "removed assistant copy artifacts (citation markers, tracking parameters)", total, [...removed.keys()].slice(0, 8)));
+  }
+  const warned = new Map();
+  for (const entry of spec.warn_patterns || []) {
+    const re = cachedRegex(`artifact-warn:${entry.id}`, () => new RegExp(entry.pattern, "g"));
+    const n = countMatches(text, re);
+    if (n) warned.set(entry.id, n);
+  }
+  if (warned.size) {
+    const total = [...warned.values()].reduce((a, b) => a + b, 0);
+    findings.push(finding("artifacts", "copy-artifact", "warn", "assistant upload or session references present (review the link)", total, [...warned.keys()].slice(0, 8)));
+  }
+  return { text, findings };
+}
+
 const LAYERS = {
+  entities: cleanEntities,
   characters: cleanCharacters,
   homoglyphs: cleanHomoglyphs,
   typography: cleanTypography,
   voice: cleanVoice,
+  artifacts: cleanArtifacts,
 };
 
 module.exports = { LAYERS };

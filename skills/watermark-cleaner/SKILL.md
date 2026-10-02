@@ -31,19 +31,22 @@ watermark-cleaner check <path>
 watermark-cleaner fix <path>
 ```
 
+For text the user pastes into the conversation instead of a file, pipe it through stdin: `printf '%s' "$TEXT" | watermark-cleaner fix -` prints the cleaned text on stdout and the report on stderr.
+
 `fix` writes a `.bak` backup next to every changed file. Use `--no-backup` only inside git hooks where git itself is the backup.
 
 ## Options that matter
 
 - `--no-voice` cleans only the mechanical layers (invisible characters, typography, metadata) without style enforcement.
 - `--aggressive` also replaces homoglyphs, strips variation selectors and removes ICC color profiles.
-- `--strict` on `fix` exits non-zero when AI phrases remain that need a human rewrite.
+- `--strict` on `fix` exits non-zero when AI phrases remain that need a human rewrite; on `check` it exits non-zero when anything would change, which makes it a CI gate.
 - `--json` for machine-readable reports.
 
 ## Guarantees to relay to the user
 
-- Image cleaning (JPEG, PNG, WebP, SVG) is lossless; pixels are never re-encoded. GIF and TIFF are never modified.
-- Legitimate text is preserved: emoji sequences, Persian and Indic joiners, right-to-left documents and number formatting survive cleaning.
+- Image cleaning (JPEG, PNG, WebP, SVG) is lossless; pixels are never re-encoded. GIF, TIFF, HEIC and AVIF are never modified. DOCX, PPTX, XLSX, ODT, ODP and ODS lose author and application fields losslessly. PDF is reported, never rewritten.
+- Legitimate text is preserved: emoji sequences including subdivision flags, keycaps and variation selectors on symbols, Persian and Indic joiners, right-to-left documents, number ranges, French punctuation spacing and number formatting survive cleaning.
+- Assistant copy artifacts are removed: ChatGPT's private-use citation delimiters and `citeturn0search0` tokens, Gemini `[cite: 1]` markers, `【1†source】` references and `utm_source=chatgpt.com` style tracking parameters.
 - Code blocks, inline code and frontmatter are protected from typography and voice rules.
 
 ## Boundaries

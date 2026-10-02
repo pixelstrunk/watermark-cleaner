@@ -7,7 +7,7 @@ Thanks for helping. This project is small on purpose, and contributions that kee
 Python and Node must behave identically. Every change to cleaning behavior needs three things:
 
 1. The rule change in `rules/*.json` (single source of truth), then run `bash scripts/sync-rules.sh` to copy it into both packages.
-2. If code changes are needed, matching changes in `python/watermark-cleaner/` and `node/src/`.
+2. If code changes are needed, matching changes in `python/watermark_cleaner/` and `node/src/`.
 3. A test in `tests/` (Python), a test in `node/test/run.js` (Node), and ideally a line in `tests/fixtures/parity/sample.md` so the parity check covers it.
 
 CI enforces this: the rules-sync job fails when the rule files drift apart, and the parity job fails when the two CLIs produce different output.
@@ -30,7 +30,9 @@ No dependencies are needed for either implementation.
 This is the easiest way to contribute and needs no code. The rulebook lives in `rules/`:
 
 - `phrases.json` holds the AI phrase lists. `banned_phrases` block, `safe_delete_phrases` are auto-removed, `lexicon_warn` only warns. Before adding to `safe_delete_phrases`, make sure the phrase never carries an object; "let's explore the API" must not be cut down to "the API".
-- `characters.json` holds the invisible character lists. Before adding a codepoint, check it is not required by any script; the zero width non-joiner incident (required in Persian) is the cautionary tale.
+- `characters.json` holds the invisible character lists. Before adding a codepoint, check it is not required by any script; the zero width non-joiner incident (required in Persian) and the subdivision flag incident (tag characters are part of the England, Scotland and Wales emoji) are the cautionary tales.
+- `artifacts.json` holds the copy artifacts assistants leave in pasted text (citation markers, tracking parameters). A new pattern needs a real sample and must be near zero false positives, because these are removed without asking.
+- German phrases go into the same lists as English ones; the regexes are language neutral. Never add a German phrase to `safe_delete_phrases`, deleting a German clause opener changes the word order of the rest of the sentence.
 
 Run `bash scripts/sync-rules.sh` after editing, and add a test that shows the new rule working.
 

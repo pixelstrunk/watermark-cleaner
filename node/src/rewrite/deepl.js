@@ -30,7 +30,7 @@ async function translate(text, apiKey, targetLang, sourceLang) {
     headers: {
       Authorization: `DeepL-Auth-Key ${apiKey}`,
       "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "watermark-cleaner/0.2",
+      "User-Agent": "watermark-cleaner/0.3",
     },
     body: body.toString(),
   });

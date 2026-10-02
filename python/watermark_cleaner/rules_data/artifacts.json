@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "remove_patterns": [
+    {
+      "id": "chatgpt-citation-token",
+      "pattern": "cite(?:turn\\d+(?:search|news|view|image|file|fetch|forecast|sports|finance|academia|product|map)\\d+)+\\b",
+      "example": "citeturn0search0"
+    },
+    {
+      "id": "chatgpt-attributable-index",
+      "pattern": "\\s?attributableIndex=\"[^\"]*\"",
+      "example": "attributableIndex=\"0-1\""
+    },
+    {
+      "id": "gemini-citation",
+      "pattern": "\\[cite(?:_start|_end|:\\s*\\d+(?:\\s*,\\s*\\d+)*)\\]",
+      "example": "[cite: 1]"
+    },
+    {
+      "id": "gemini-span",
+      "pattern": "\\[span_\\d+\\](?:\\((?:start|end)_span\\))?",
+      "example": "[span_1](start_span)"
+    },
+    {
+      "id": "lenticular-citation",
+      "pattern": "【\\d+†[^】\\n]{0,40}(?:】|(?=\\s)|$)",
+      "example": "【4†source】"
+    },
+    {
+      "id": "grok-citation-card",
+      "pattern": "\\bgrok_render_citation_card_json\\b(?:=\\{[^}\\n]*\\})?",
+      "example": "grok_render_citation_card_json"
+    }
+  ],
+  "warn_patterns": [
+    {
+      "id": "perplexity-upload-url",
+      "pattern": "https?://ppl-ai-file-upload\\.[^\\s)\\]\"']+",
+      "example": "https://ppl-ai-file-upload.s3.amazonaws.com/..."
+    }
+  ],
+  "url_tracking_params": {
+    "utm_source": [
+      "chatgpt.com",
+      "openai",
+      "perplexity",
+      "copilot.microsoft.com",
+      "gemini.google.com"
+    ]
+  }
+}

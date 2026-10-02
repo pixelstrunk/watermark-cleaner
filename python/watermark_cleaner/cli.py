@@ -6,6 +6,11 @@ from . import __version__
 from .config import ConfigError, apply_aggressive, load_config
 from .report import render_report, render_summary
 from .runner import run
+from .core import clean_text
+from .findings import Finding, Report
+from .rules import load_rules
+
+_STDIN = "-"
 
 
 def build_parser():
@@ -18,14 +23,14 @@ def build_parser():
 
     for name in ("check", "fix"):
         p = sub.add_parser(name, help=f"{name} files or folders")
-        p.add_argument("paths", nargs="*", default=["."], help="files or folders (default: .)")
+        p.add_argument("paths", nargs="*", default=["."], help="files or folders (default: .), or - for stdin")
         p.add_argument("--config", help="path to a watermark-cleaner config file")
         p.add_argument("--json", action="store_true", help="emit json report")
         p.add_argument("--no-voice", action="store_true", help="disable the voice/ai-phrase layer")
         p.add_argument("--aggressive", action="store_true", help="also replace homoglyphs and strip variation selectors")
         p.add_argument("--no-backup", action="store_true", help="do not write .bak backups (use inside git hooks)")
         p.add_argument("--quiet", action="store_true", help="only print the summary line")
-        p.add_argument("--strict", action="store_true", help="fix only: exit non-zero when blocking findings remain")
+        p.add_argument("--strict", action="store_true", help="check: exit 1 when anything would change; fix: exit 1 when blocking findings remain")
 
     rewrite = sub.add_parser("rewrite", help="optional deepl rewrite (opt-in, sends text to deepl)")
     rewrite.add_argument("paths", nargs="+", help="text files to rewrite")
@@ -38,6 +43,8 @@ def build_parser():
 
 def _resolve_config(args):
     start = args.paths[0] if getattr(args, "paths", None) else "."
+    if start == _STDIN:
+        start = "."
     config = load_config(getattr(args, "config", None), start)
     if getattr(args, "no_voice", False):
         config["voice"] = False
@@ -48,30 +55,63 @@ def _resolve_config(args):
     return config
 
 
-def _run_scan(args, write):
-    config = _resolve_config(args)
-    paths = args.paths or ["."]
-    reports = run(paths, config, write=write)
+def _scan_stdin(config, write):
+    raw = sys.stdin.buffer.read()
+    try:
+        original = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        report = Report(path="<stdin>")
+        report.findings.append(Finding("io", "read", "warn", "skipped (not utf-8 text)", 1))
+        return [report], raw
+    cleaned, report = clean_text(original, config=config, rules=load_rules(), path="<stdin>")
+    return [report], cleaned.encode("utf-8") if write else raw
 
+
+def _print_reports(reports, args, write, stream):
     if args.json:
         payload = {
             "mode": "fix" if write else "check",
             "summary": render_summary(reports, write),
             "reports": [r.to_dict() for r in reports],
         }
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-    else:
-        if not args.quiet:
-            for report in reports:
-                if report.findings:
-                    print(render_report(report, write))
-        print()
-        print(render_summary(reports, write))
+        print(json.dumps(payload, ensure_ascii=False, indent=2), file=stream)
+        return
+    if not args.quiet:
+        for report in reports:
+            if report.findings:
+                print(render_report(report, write), file=stream)
+    print(file=stream)
+    print(render_summary(reports, write), file=stream)
 
+
+def _exit_code(reports, args, write):
+    strict = getattr(args, "strict", False)
     blocking = any(r.has_blocking for r in reports)
-    if blocking and (not write or getattr(args, "strict", False)):
+    if blocking and (not write or strict):
+        return 1
+    if strict and not write and any(r.changed for r in reports):
         return 1
     return 0
+
+
+def _run_scan(args, write):
+    config = _resolve_config(args)
+    paths = args.paths or ["."]
+    if paths == [_STDIN]:
+        reports, output = _scan_stdin(config, write)
+        if write:
+            sys.stdout.buffer.write(output)
+            sys.stdout.buffer.flush()
+            _print_reports(reports, args, write, sys.stderr)
+        else:
+            _print_reports(reports, args, write, sys.stdout)
+        return _exit_code(reports, args, write)
+    if _STDIN in paths:
+        print("stdin (-) cannot be combined with file paths", file=sys.stderr)
+        return 2
+    reports = run(paths, config, write=write)
+    _print_reports(reports, args, write, sys.stdout)
+    return _exit_code(reports, args, write)
 
 
 def _run_rewrite(args):

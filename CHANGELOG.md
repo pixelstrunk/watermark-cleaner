@@ -5,8 +5,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-02
+
 ### Added
 
+- Read from stdin: `watermark-cleaner fix -` cleans standard input and writes the cleaned text to stdout with the report on stderr, so `pbpaste | watermark-cleaner fix - | pbcopy` cleans the clipboard. `check -` reports on stdin without writing anything.
+- `check --strict` exits 1 when anything would change, not only on blocking phrases. Use it as a CI gate for hidden characters and metadata.
+- Assistant copy artifacts are removed: private-use characters (ChatGPT's citation delimiters U+E200 to U+E203 and every other private-use codepoint), the leftover tokens `citeturn0search0`, `[cite: 1]`, `[span_1](start_span)`, `【1†source】` and `grok_render_citation_card_json`, plus `utm_source=chatgpt.com|openai|perplexity|copilot.microsoft.com|gemini.google.com` tracking parameters in links. Links to Perplexity upload buckets are reported as a warning. Rules live in `rules/artifacts.json`; the layer skips code blocks.
+- HTML entities that encode invisible characters (`&#8203;`, `&#x200B;`, `&zwnj;`, `&zwj;`, `&shy;`, `&#65279;`, `&ZeroWidthSpace;`, bidi and tag entities) are decoded and then handled by the character rules, so a zero width space hidden as an entity in HTML or Markdown no longer passes. `&nbsp;` and other visible-width entities are left alone, and entities inside code spans are treated as documentation.
+- PPTX, XLSX, ODP and ODS metadata stripping: core and app properties like DOCX, plus comment author names and initials (`ppt/commentAuthors.xml`, `ppt/authors.xml`, `xl/comments*.xml`, `xl/persons/person.xml`).
+- PDF files are now scanned read-only: `check` reports when `/Author`, `/Creator`, `/Producer`, XMP or a C2PA manifest is present and says that the file is not rewritten. HEIC, HEIF and AVIF are reported as unsupported like GIF and TIFF instead of being silently ignored.
+- Variation selectors are removed by default when they follow a character that cannot carry one (a letter, a space, another selector, the start of text), which closes the data smuggling channel through `U+FE00` to `U+FE0F` and `U+E0100` to `U+E01EF`. Selectors after emoji, symbols, digits (keycaps), CJK ideographs and Mongolian letters stay. `--aggressive` still strips them all.
+- New invisible characters: Hangul choseong and jungseong fillers (U+115F, U+1160) and the noncharacters U+FDD0 to U+FDEF, U+FFFE, U+FFFF. U+2010 hyphen and U+2011 non-breaking hyphen become an ascii hyphen.
+- Phrase rulebook refresh from the July 2026 Wikipedia list and current detector research: chat residue blocks (`Certainly! Here's`, `I hope this helps`, `Let me know if you`, `As an AI language model`), significance phrases block (`plays a crucial role`, `cannot be overstated`, `serves as a testament`, `setting the stage for`), new warn shapes `participial-tail` (", highlighting the importance of"), `copula-avoidance` ("serves as a") and `no-no-just`, plus about thirty new lexicon words (`boasts`, `nestled`, `meticulous`, `interplay`, `landscape`, `showcasing`).
+- First German rules: blocking phrases (`in der heutigen digitalen Welt`, `es ist wichtig zu beachten, dass`, `zusammenfassend lässt sich sagen`, `als KI-Sprachmodell`, `spielt eine entscheidende Rolle`), the shapes `nicht-nur-sondern-auch` (warn) and `es-geht-nicht-um-es-geht-um` (block), lexicon warnings (`essenziell`, `nahtlos`, `maßgeschneidert`, `ganzheitlich`, `wegweisend`) and transition tics (`zudem`, `ferner`, `des Weiteren`, `darüber hinaus`). German phrases are never auto-deleted because German subordinate clauses change word order.
 - DOCX and ODT metadata stripping (`docProps/core.xml` and `docProps/app.xml` for DOCX, `meta.xml` for ODT): author, last-editor and creating-application fields are removed, container-level and lossless, with every other part of the archive copied through byte-for-byte. PDF is not supported yet.
 - Config files are now validated on load: wrong types (for example `"voice": 0`) fail with a clear message and exit code 2 instead of behaving differently per CLI.
 - Per-shape severity in the phrase rulebook. `not-only-but-also` and `less-x-more-y` now warn instead of block, because they flag ordinary English too often.
@@ -14,6 +26,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- Subdivision flag emoji (England, Scotland, Wales) are no longer destroyed. They are built from a black flag plus tag characters and the tag characters were removed unconditionally; well-formed flag sequences now stay while every other tag character, including the tag space used in 2026 phishing campaigns, is still removed.
+- A spaced dash between two numbers (`10 – 20 Uhr`, `1990 — 2000`) becomes a hyphen instead of the configured comma, which used to change the meaning of ranges.
+- French typography survives: the narrow no-break space before `: ; ! ? »` and after `«` is kept like the number guard keeps `12 000`. Disable with `keep_nbsp_in_numbers: false`.
+- DOCX files written by Java libraries (Apache POI and friends) use streamed ZIP entries. After cleaning, the local header of an unmodified entry still announced a data descriptor that was no longer there, which broke sequential readers such as Java's ZipInputStream. Every local header is now written from the central directory values.
+- Inline code with double backticks (`` `` like ` this `` ``) is protected from typography and voice rules like single-backtick code.
+- U+034F combining grapheme joiner is kept next to Hebrew text, where Unicode 17 documents a legitimate use. U+2800 braille blank is kept inside braille text.
+- `check` now counts images and documents with strippable metadata as "would change" and labels them "would fix", consistent with text files. They used to be reported as warnings.
 - Files with Windows (CRLF) line endings: front matter and code protection now works on them, and neither CLI rewrites line endings anymore. Previously the Node CLI could edit YAML front matter in CRLF files and the Python CLI silently converted every CRLF file to LF.
 - The `exclude` list no longer matches directories above the path you asked to scan. `check build/docs` previously scanned zero files and reported success in the Python CLI.
 - The Python CLI preserves file permissions when rewriting; previously rewritten files ended up owner-only (0600).
@@ -35,6 +54,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - SVG files that are not valid UTF-8 are skipped with a warning, like text files. Previously `fix` rewrote them anyway: the Python CLI silently dropped every non-ASCII byte ("Caf Mnchen") and the Node CLI wrote replacement characters.
 - A file or folder the tool may not read or write no longer aborts the whole run with a stack trace. It is reported per path as `skipped (permission denied)` and every other file is still processed. Both CLIs now also agree on symlinks: a symlink to a directory passed as an argument is scanned (the Node CLI used to scan nothing and report success), symlinked directories inside the tree are never followed, and directory listings are walked in the same byte order.
 - More hiding places for invisible characters are covered. The zero width joiner (U+200D) is now removed between ordinary letters and kept only next to emoji or inside scripts that need it; previously it was never touched anywhere. Deprecated format controls (U+206A to U+206F), interlinear annotation characters (U+FFF9 to U+FFFB) and the hangul fillers (U+3164, U+FFA0) are removed, line and paragraph separators (U+2028, U+2029) and the braille blank (U+2800) become normal spaces, and the Mongolian variation selectors (U+180B to U+180D) follow the `--aggressive` rule like the other variation selectors.
+
+### Changed
+
+- Default layers are now `entities, characters, homoglyphs, typography, voice, artifacts`. Projects that set `layers` explicitly need to add `entities` and `artifacts` to get the new behavior.
+- Default `document_extensions` include `.pptx`, `.xlsx`, `.odp`, `.ods` and `.pdf`; default `image_extensions` include `.heic`, `.heif` and `.avif`.
+- CI tests Python 3.9, 3.12 and 3.14 and Node 20, 22 and 24. Node 18 still works but is no longer tested because it reached end of life.
 
 ## [0.2.1] - 2026-08-14
 

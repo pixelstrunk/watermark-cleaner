@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const RULE_FILES = ["characters", "typography", "phrases", "homoglyphs"];
+const RULE_FILES = ["characters", "typography", "phrases", "homoglyphs", "artifacts"];
 
 function candidateDirs() {
   const dirs = [];

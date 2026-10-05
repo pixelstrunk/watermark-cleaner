@@ -9,6 +9,8 @@ Remove AI text artifacts, hidden unicode characters and file metadata before you
 
 Watermark Cleaner is a deterministic, offline, zero-dependency tool for content you own. It cleans the mechanical traces that mark text as machine generated, removes the citation markers and tracking parameters that assistants leave in copied text, flags the stylistic phrases that read as AI writing (English and German), and strips identifying metadata from images and office documents without touching a single pixel. It ships as a Python CLI and a Node CLI that share one rule set and are tested to behave identically.
 
+Try it in your browser, no install: [christianstrunk.com/tools/ai-watermark-cleaner](https://www.christianstrunk.com/tools/ai-watermark-cleaner)
+
 ## See it
 
 The problem is invisible by definition. Escaped, it looks like this:
@@ -197,7 +199,7 @@ This back translates the text (source to pivot and back) using a model that is n
 
 ## Use as a library
 
-The Node package has two entries. `watermark-cleaner` is for Node and loads the rules from disk, `watermark-cleaner/browser` has no file system access and ships the rules bundled, so it works in a web page or a worker. Both export the same functions.
+The Node package has two entries. `watermark-cleaner` is for Node and loads the rules from disk, `watermark-cleaner/browser` has no file system access and ships the rules bundled, so it works in a web page or a worker. Both export the same functions. The web version at [christianstrunk.com/tools/ai-watermark-cleaner](https://www.christianstrunk.com/tools/ai-watermark-cleaner) runs on exactly this browser entry.
 
 ```js
 import { cleanText, classifyCharacters, findPhrases, stripJpeg, RULES } from "watermark-cleaner/browser";

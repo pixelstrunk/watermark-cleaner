@@ -38,6 +38,7 @@
   "engines": {
     "node": ">=18"
   },
+  "homepage": "https://www.christianstrunk.com/tools/ai-watermark-cleaner",
   "repository": {
     "type": "git",
     "url": "https://github.com/pixelstrunk/watermark-cleaner"

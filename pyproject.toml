@@ -30,7 +30,8 @@ classifiers = [
 watermark-cleaner = "watermark_cleaner.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/pixelstrunk/watermark-cleaner"
+Homepage = "https://www.christianstrunk.com/tools/ai-watermark-cleaner"
+Repository = "https://github.com/pixelstrunk/watermark-cleaner"
 Issues = "https://github.com/pixelstrunk/watermark-cleaner/issues"
 Changelog = "https://github.com/pixelstrunk/watermark-cleaner/blob/main/CHANGELOG.md"
 

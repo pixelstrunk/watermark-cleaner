@@ -189,6 +189,7 @@ ok("nbsp between non-ascii digits replaced", () => {
 });
 
 const { stripJpeg, stripPng, stripWebp, cleanFile: cleanImageFile, inspectFile: inspectImageFile } = require("../src/metadata");
+const { readOrientation, crc32 } = require("../src/image");
 
 function jpegSegment(marker, payload) {
   const head = Buffer.from([0xff, marker, 0, 0]);
@@ -318,6 +319,103 @@ ok("png icc stripped when requested", () => {
   const { cleaned, stripped } = stripPng(data, true);
   assert.strictEqual(stripped, 1);
   assert.ok(!cleaned.includes("iCCP"));
+});
+
+function tiffWithOrientation(orientation, little) {
+  const order = little ? [0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00] : [0x4d, 0x4d, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x08];
+  const u16 = (v) => (little ? [v & 0xff, v >> 8] : [v >> 8, v & 0xff]);
+  const u32 = (v) => (little ? [v & 0xff, (v >> 8) & 0xff, 0, 0] : [0, 0, (v >> 8) & 0xff, v & 0xff]);
+  return Buffer.from([...order, ...u16(2), ...u16(0x010f), ...u16(2), ...u32(4), 0x41, 0x42, 0x43, 0x00, ...u16(0x0112), ...u16(3), ...u32(1), ...u16(orientation), 0, 0, 0, 0, 0, 0]);
+}
+
+function jpegWithOrientation(orientation, little, withApp0 = true) {
+  const parts = [Buffer.from([0xff, 0xd8])];
+  if (withApp0) parts.push(jpegSegment(0xe0, Buffer.from("JFIF\x00\x01\x02", "latin1")));
+  parts.push(jpegSegment(0xe1, Buffer.concat([Buffer.from("Exif\x00\x00", "latin1"), tiffWithOrientation(orientation, little)])));
+  parts.push(jpegSegment(0xdb, Buffer.alloc(65)), Buffer.from([0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00]), Buffer.from("scan", "latin1"), Buffer.from([0xff, 0xd9]));
+  return Buffer.concat(parts);
+}
+
+const MINIMAL_EXIF_TIFF = Buffer.from([0x4d, 0x4d, 0x00, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0]);
+
+ok("jpeg keeps exif orientation in a minimal app1 behind app0", () => {
+  const { cleaned, stripped, orientation } = stripJpeg(jpegWithOrientation(6, false));
+  assert.strictEqual(stripped, 1);
+  assert.strictEqual(orientation, 6);
+  assert.ok(!cleaned.includes("ABC"));
+  const app0 = cleaned.indexOf("JFIF");
+  const app1 = cleaned.indexOf("Exif\x00\x00", "latin1");
+  assert.ok(app0 !== -1 && app1 > app0);
+  assert.strictEqual(cleaned.readUInt16BE(app1 - 2), 34);
+  assert.ok(cleaned.subarray(app1 + 6, app1 + 6 + 26).equals(MINIMAL_EXIF_TIFF));
+  assert.strictEqual(readOrientation(cleaned.subarray(app1, app1 + 32)), 6);
+});
+
+ok("jpeg orientation app1 goes right after soi without app0, little-endian exif is read too", () => {
+  const { cleaned, orientation } = stripJpeg(jpegWithOrientation(8, true, false));
+  assert.strictEqual(orientation, 8);
+  assert.strictEqual(cleaned[2], 0xff);
+  assert.strictEqual(cleaned[3], 0xe1);
+  assert.strictEqual(readOrientation(cleaned.subarray(6, 38)), 8);
+  assert.strictEqual(stripJpeg(jpegWithOrientation(3, false)).orientation, 3);
+});
+
+ok("upright or missing orientation writes no exif back", () => {
+  const upright = stripJpeg(jpegWithOrientation(1, false));
+  assert.strictEqual(upright.orientation, null);
+  assert.ok(!upright.cleaned.includes("Exif"));
+  const none = stripJpeg(makeJpeg(true));
+  assert.strictEqual(none.orientation, null);
+  assert.ok(!none.cleaned.includes("Exif"));
+});
+
+ok("cleaning a cleaned rotated jpeg is a no-op", () => {
+  const once = stripJpeg(jpegWithOrientation(6, false)).cleaned;
+  const twice = stripJpeg(once);
+  assert.ok(twice.cleaned.equals(once));
+  const dir = require("fs").mkdtempSync(path.join(require("os").tmpdir(), "wmc-orient-"));
+  const file = path.join(dir, "photo.jpg");
+  require("fs").writeFileSync(file, once);
+  const report = inspectImageFile(file, false);
+  assert.strictEqual(report.changed, false);
+  assert.deepStrictEqual(report.findings, []);
+});
+
+ok("png keeps exif orientation in an eXIf chunk behind ihdr with a valid crc", () => {
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const data = Buffer.concat([sig, pngChunk("IHDR", Buffer.alloc(13)), pngChunk("tEXt", Buffer.from("Software\x00ai", "latin1")), pngChunk("eXIf", tiffWithOrientation(6, true)), pngChunk("IDAT", Buffer.alloc(1)), pngChunk("IEND", Buffer.alloc(0))]);
+  const { cleaned, stripped, orientation } = stripPng(data);
+  assert.strictEqual(stripped, 2);
+  assert.strictEqual(orientation, 6);
+  const at = cleaned.indexOf("eXIf");
+  assert.strictEqual(at, 8 + 25 + 4);
+  assert.strictEqual(cleaned.readUInt32BE(at - 4), 26);
+  assert.ok(cleaned.subarray(at + 4, at + 30).equals(MINIMAL_EXIF_TIFF));
+  assert.strictEqual(cleaned.readUInt32BE(at + 30), crc32(cleaned.subarray(at, at + 30)));
+  assert.strictEqual(crc32(Buffer.from("123456789", "latin1")), 0xcbf43926);
+});
+
+ok("webp keeps exif orientation in a trailing exif chunk and keeps the vp8x exif flag", () => {
+  const body = Buffer.concat([
+    webpChunk("VP8X", Buffer.concat([Buffer.from([0x0c]), Buffer.alloc(9)])),
+    webpChunk("VP8 ", Buffer.alloc(10)),
+    webpChunk("EXIF", Buffer.concat([Buffer.from("Exif\x00\x00", "latin1"), tiffWithOrientation(6, false)])),
+    webpChunk("XMP ", Buffer.from("xmp-payload", "latin1")),
+  ]);
+  const header = Buffer.alloc(12);
+  header.write("RIFF", 0, "latin1");
+  header.writeUInt32LE(body.length + 4, 4);
+  header.write("WEBP", 8, "latin1");
+  const { cleaned, stripped, orientation } = stripWebp(Buffer.concat([header, body]));
+  assert.strictEqual(stripped, 2);
+  assert.strictEqual(orientation, 6);
+  assert.ok(!cleaned.includes("xmp-payload"));
+  assert.strictEqual(cleaned[cleaned.indexOf("VP8X") + 8], 0x08);
+  const at = cleaned.lastIndexOf("EXIF");
+  assert.strictEqual(at, cleaned.length - 34);
+  assert.strictEqual(cleaned.readUInt32LE(at + 4), 26);
+  assert.ok(cleaned.subarray(at + 8).equals(MINIMAL_EXIF_TIFF));
+  assert.strictEqual(cleaned.readUInt32LE(4), cleaned.length - 8);
 });
 
 ok("jpeg icc kept by default", () => {
@@ -968,7 +1066,7 @@ ok("assistant copy artifacts and tracking parameters are removed, uploads only w
     "and 【4†source】 see https://x.io/a?utm_source=chatgpt.com&b=1 " +
     "and https://x.io/b?c=2&utm_source=openai and https://x.io/c?utm_source=perplexity done.";
   const result = clean(text);
-  assert.strictEqual(result.text, "Fact  and  and x and  see https://x.io/a?b=1 and https://x.io/b?c=2 and https://x.io/c done.");
+  assert.strictEqual(result.text, "Fact and and x and see https://x.io/a?b=1 and https://x.io/b?c=2 and https://x.io/c done.");
   const artifact = result.report.findings.find((f) => f.layer === "artifacts");
   assert.strictEqual(artifact.severity, "fixed");
   assert.ok(artifact.examples.includes("utm_source-tracking"));
@@ -978,6 +1076,92 @@ ok("assistant copy artifacts and tracking parameters are removed, uploads only w
   assert.strictEqual(uploadResult.text, upload);
   assert.deepStrictEqual(uploadResult.report.findings.filter((f) => f.layer === "artifacts").map((f) => f.severity), ["warn"]);
   assert.strictEqual(clean("`citeturn0search0` stays").text, "`citeturn0search0` stays");
+});
+
+ok("removing a copy artifact leaves a single space and none before punctuation", () => {
+  assert.strictEqual(clean("See source citeturn0search0 and more").text, "See source and more");
+  assert.strictEqual(clean("Fact citeturn0search0.").text, "Fact.");
+  assert.strictEqual(clean("A [cite: 1] b, then 【1†source】!").text, "A b, then!");
+  assert.strictEqual(clean("(see citeturn0search0) and (citeturn0search0 more)").text, "(see) and (more)");
+  assert.strictEqual(clean("citeturn0search0 start, end citeturn0search0\nnext").text, "start, end\nnext");
+  assert.strictEqual(clean("a citeturn0search0 citeturn0search1 b citeturn0search0 citeturn0search1.").text, "a b.");
+  assert.strictEqual(clean("tab\tciteturn0search0\tsep").text, "tab\tsep");
+});
+
+const browser = require("../src/browser");
+const nodeEntry = require("../src/core");
+
+ok("browser entry cleans every text fixture exactly like the node entry", () => {
+  const dir = path.join(__dirname, "..", "..", "tests", "fixtures", "parity");
+  for (const name of fs.readdirSync(dir).filter((n) => /\.(md|html)$/.test(n))) {
+    const text = fs.readFileSync(path.join(dir, name), "utf8");
+    const viaBrowser = browser.cleanText(text);
+    const viaNode = nodeEntry.cleanText(text);
+    assert.strictEqual(viaBrowser.text, viaNode.text, name);
+    assert.deepStrictEqual(viaBrowser.report.findings, viaNode.report.findings, name);
+  }
+  assert.deepStrictEqual(browser.DEFAULTS, DEFAULTS);
+  assert.deepStrictEqual(Object.keys(browser.RULES).sort(), ["artifacts", "characters", "homoglyphs", "phrases", "typography"]);
+  assert.strictEqual(browser.cleanText("a\u200bb", { layers: ["typography"] }).text, "a\u200bb");
+});
+
+ok("package exports expose only the two entries and block deep imports", () => {
+  const pkg = require("../package.json");
+  assert.deepStrictEqual(Object.keys(pkg.exports), [".", "./browser", "./package.json"]);
+  assert.strictEqual(pkg.version, "0.4.0");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "browser.js"), "utf8");
+  for (const forbidden of ['require("fs")', 'require("path")', 'require("./config")', 'require("./rules")', 'require("./metadata")', 'require("./office")']) assert.ok(!src.includes(forbidden), forbidden);
+  for (const file of ["defaults.js", "pipeline.js", "protect.js", "layers.js", "image.js"]) {
+    const code = fs.readFileSync(path.join(__dirname, "..", "src", file), "utf8");
+    assert.ok(!/require\("(fs|path|zlib|crypto|os)"\)/.test(code), `${file} must not touch node built-ins`);
+  }
+});
+
+ok("classifyCharacters mirrors the characters layer decision for every code point", () => {
+  const text = "a\u200bb\u2003c 12\u00a0000 \u{1f469}\u200d\u{1f4bb} x\u200d y\u202e";
+  const classes = browser.classifyCharacters(text);
+  assert.strictEqual(classes.length, Array.from(text).length);
+  const rebuilt = classes.map((c) => (c.action === "remove" ? "" : c.action === "space" ? " " : c.char)).join("");
+  assert.strictEqual(rebuilt, clean(text, { layers: ["characters"], normalize_form: "none" }).text);
+  assert.deepStrictEqual(classes[1], { index: 1, char: "\u200b", code: 0x200b, action: "remove", name: "zero width space" });
+  assert.deepStrictEqual(classes[3], { index: 3, char: "\u2003", code: 0x2003, action: "space", name: "exotic space" });
+  assert.strictEqual(classes.find((c) => c.code === 0xa0).action, "keep");
+  const joiners = classes.filter((c) => c.code === 0x200d).map((c) => c.action);
+  assert.deepStrictEqual(joiners, ["keep", "remove"]);
+  assert.strictEqual(classes[classes.length - 1].name, "bidi embedding / override");
+  assert.ok(classes.every((c) => c.action !== "keep" || c.name === null));
+});
+
+ok("findPhrases returns offsets, kinds and severities and skips code", () => {
+  const text = "Without further ado, we delve into the `delve` landscape. This isn\u2019t a tool. This is a movement.";
+  const hits = browser.findPhrases(text);
+  assert.deepStrictEqual(hits.map((h) => [h.kind, h.id, h.severity, text.slice(h.start, h.end)]), [
+    ["filler", "without further ado", "fixed", "Without further ado"],
+    ["banned", "delve into", "error", "delve into"],
+    ["lexicon", "delve", "warn", "delve"],
+    ["lexicon", "landscape", "warn", "landscape"],
+    ["shape", "this-isnt-this-is", "error", "This isn\u2019t a tool. This is"],
+  ]);
+  assert.deepStrictEqual(browser.findPhrases(text, { voice: false }), []);
+  assert.ok(!browser.findPhrases(text, { ignore_phrases: ["delve into", "landscape"] }).some((h) => h.id === "delve into" || h.id === "landscape"));
+  assert.ok(browser.findPhrases("we must synergize", { custom_banned_phrases: ["synergize"] }).some((h) => h.kind === "banned" && h.id === "synergize"));
+  assert.ok(browser.findPhrases("delve into the `delve into` code", { protect_code: false }).filter((h) => h.id === "delve into").length === 2);
+  const warnShape = browser.findPhrases("Not only fast but also cheap.").find((h) => h.kind === "shape");
+  assert.strictEqual(warnShape.severity, "warn");
+});
+
+ok("findings carry per-rule counts", () => {
+  const result = clean("Fact citeturn0search0 and citeturn1search2 and https://x.io/a?utm_source=chatgpt.com see \u201cq\u201d and \u201cq\u201d fast \u2014 slow 10 \u2013 20 wait\u2026 &#8203;x a\u200bb\u200bc delve into the landscape, landscape");
+  const byKind = Object.fromEntries(result.report.findings.map((f) => [`${f.layer}/${f.kind}/${f.severity}`, f.by_rule]));
+  assert.deepStrictEqual(byKind["artifacts/copy-artifact/fixed"], { "chatgpt-citation-token": 2, "utm_source-tracking": 1 });
+  assert.deepStrictEqual(byKind["typography/smart-quote/fixed"], { "U+201C": 2, "U+201D": 2 });
+  assert.deepStrictEqual(byKind["typography/dash/fixed"], { range: 1, spaced: 1 });
+  assert.deepStrictEqual(byKind["typography/punctuation/fixed"], { "U+2026": 1 });
+  assert.deepStrictEqual(byKind["entities/html-entity/fixed"], { "&#8203;": 1 });
+  assert.deepStrictEqual(byKind["characters/invisible-character/fixed"], { "U+200B": 3 });
+  assert.deepStrictEqual(byKind["voice/banned-phrase/error"], { "delve into": 1 });
+  assert.deepStrictEqual(byKind["voice/lexicon/warn"], { delve: 1, landscape: 2 });
+  assert.ok(result.report.findings.every((f) => typeof f.by_rule === "object"));
 });
 
 ok("double backtick code spans are protected", () => {

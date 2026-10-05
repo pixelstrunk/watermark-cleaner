@@ -61,6 +61,7 @@ function serializeReport(report) {
       message: f.message,
       count: f.count,
       examples: f.examples || [],
+      by_rule: f.by_rule || {},
     })),
   };
 }

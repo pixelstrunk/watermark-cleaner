@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 SEVERITY_ORDER = {"fixed": 0, "info": 1, "warn": 2, "error": 3}
 
@@ -12,6 +12,7 @@ class Finding:
     message: str
     count: int = 1
     examples: List[str] = field(default_factory=list)
+    by_rule: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self):
         return {
@@ -21,6 +22,7 @@ class Finding:
             "message": self.message,
             "count": self.count,
             "examples": self.examples,
+            "by_rule": self.by_rule,
         }
 
 

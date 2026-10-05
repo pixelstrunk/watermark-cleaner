@@ -266,6 +266,7 @@ def clean(text, config, rules):
                 severity="fixed",
                 message=f"removed {label} (U+{code:04X})",
                 count=count,
+                by_rule={f"U+{code:04X}": count},
             )
         )
     if orphan_selectors:

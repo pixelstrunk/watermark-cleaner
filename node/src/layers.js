@@ -1,9 +1,23 @@
+const { forEachUnprotected } = require("./protect");
+
 function hex(value) {
   return parseInt(value, 16);
 }
 
-function finding(layer, kind, severity, message, count, examples) {
-  return { layer, kind, severity, message, count, examples: examples || [] };
+function finding(layer, kind, severity, message, count, examples, byRule) {
+  return { layer, kind, severity, message, count, examples: examples || [], by_rule: byRule || {} };
+}
+
+function codeLabel(cp) {
+  return `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+function tally(map, key, n = 1) {
+  map.set(key, (map.get(key) || 0) + n);
+}
+
+function fromMap(map) {
+  return Object.fromEntries(map);
 }
 
 function buildRemoval(rules, config) {
@@ -131,7 +145,9 @@ function variationPolicy(chars) {
   return { isSelector, isOrphan };
 }
 
-function cleanCharacters(text, config, rules) {
+const KEEP = { action: "keep", name: null, tally: null };
+
+function decideCharacters(text, config, rules) {
   const chars = rules.characters;
   const { removal, ranges: removalRanges, names } = buildRemoval(rules, config);
   const { bidi, names: bidiNames } = buildBidi(rules);
@@ -161,96 +177,105 @@ function cleanCharacters(text, config, rules) {
   const flagKept = flagSequenceIndices(points, chars);
   const variation = variationPolicy(chars);
   const stripAllSelectors = Boolean(config.strip_variation_selectors);
-  const out = [];
-  const removed = new Map();
-  let keptBidi = 0;
-  let replacedSpaces = 0;
-  let orphanSelectors = 0;
+  const decisions = new Array(points.length);
 
   const neighbours = (i) => [i > 0 ? points[i - 1] : -1, i + 1 < points.length ? points[i + 1] : -1];
-  const count = (cp) => removed.set(cp, (removed.get(cp) || 0) + 1);
+  const invisible = (name) => ({ action: "remove", name, tally: "invisible" });
 
   for (let i = 0; i < points.length; i += 1) {
     const cp = points[i];
     if (zwnj !== null && cp === zwnj) {
       const [prev, next] = neighbours(i);
-      if (inRanges(prev, joining) || inRanges(next, joining)) {
-        out.push(String.fromCodePoint(cp));
-        continue;
-      }
-      count(cp);
-      names.set(cp, zwnjName);
+      decisions[i] = inRanges(prev, joining) || inRanges(next, joining) ? KEEP : invisible(zwnjName);
       continue;
     }
     if (zwj !== null && cp === zwj) {
       const [prev, next] = neighbours(i);
-      if ([prev, next].some((n) => inRanges(n, joining) || inRanges(n, emoji))) {
-        out.push(String.fromCodePoint(cp));
-        continue;
-      }
-      count(cp);
-      names.set(cp, zwjName);
+      decisions[i] = [prev, next].some((n) => inRanges(n, joining) || inRanges(n, emoji)) ? KEEP : invisible(zwjName);
       continue;
     }
     if (cgj !== null && cp === cgj) {
       const [prev, next] = neighbours(i);
-      if (inRanges(prev, cgjKeep) || inRanges(next, cgjKeep)) {
-        out.push(String.fromCodePoint(cp));
-        continue;
-      }
-      count(cp);
-      names.set(cp, cgjName);
+      decisions[i] = inRanges(prev, cgjKeep) || inRanges(next, cgjKeep) ? KEEP : invisible(cgjName);
       continue;
     }
     if (bidi.has(cp)) {
-      if (hasRtl) {
-        out.push(String.fromCodePoint(cp));
-        keptBidi += 1;
-        continue;
-      }
-      count(cp);
-      names.set(cp, bidiNames.get(cp));
+      decisions[i] = hasRtl ? { action: "keep", name: bidiNames.get(cp), tally: "bidi" } : invisible(bidiNames.get(cp));
       continue;
     }
     if (flagKept.has(i)) {
-      out.push(String.fromCodePoint(cp));
+      decisions[i] = KEEP;
       continue;
     }
     if (removal.has(cp)) {
-      count(cp);
+      decisions[i] = invisible(names.get(cp));
       continue;
     }
     const name = rangeName(cp, removalRanges);
     if (name !== null) {
-      count(cp);
-      names.set(cp, name);
+      decisions[i] = invisible(name);
       continue;
     }
     if (!stripAllSelectors && variation.isSelector(cp)) {
-      if (variation.isOrphan(points, i)) {
-        orphanSelectors += 1;
-        continue;
-      }
-      out.push(String.fromCodePoint(cp));
+      decisions[i] = variation.isOrphan(points, i) ? { action: "remove", name: "variation selector", tally: "selector" } : KEEP;
       continue;
     }
     if (exotic.has(cp)) {
       if (keepNumbers && guards.has(cp) && guardedSpace(points, i, punctuationGuard)) {
-        out.push(String.fromCodePoint(cp));
+        decisions[i] = KEEP;
         continue;
       }
       if (scriptGuards.has(cp)) {
         const [prev, next] = neighbours(i);
         const [start, end] = scriptGuards.get(cp);
         if ((prev >= start && prev <= end) || (next >= start && next <= end)) {
-          out.push(String.fromCodePoint(cp));
+          decisions[i] = KEEP;
           continue;
         }
       }
+      decisions[i] = { action: "space", name: "exotic space", tally: "space" };
+      continue;
+    }
+    decisions[i] = KEEP;
+  }
+  return { points, decisions };
+}
+
+function classifyCharacters(text, config, rules) {
+  const { points, decisions } = decideCharacters(text, config, rules);
+  return points.map((cp, index) => {
+    const decision = decisions[index];
+    return { index, char: String.fromCodePoint(cp), code: cp, action: decision.action, name: decision.action === "keep" ? null : decision.name };
+  });
+}
+
+function cleanCharacters(text, config, rules) {
+  const { points, decisions } = decideCharacters(text, config, rules);
+  const out = [];
+  const removed = new Map();
+  const names = new Map();
+  let keptBidi = 0;
+  let replacedSpaces = 0;
+  let orphanSelectors = 0;
+
+  for (let i = 0; i < points.length; i += 1) {
+    const cp = points[i];
+    const decision = decisions[i];
+    if (decision.action === "remove") {
+      if (decision.tally === "invisible") {
+        tally(removed, cp);
+        names.set(cp, decision.name);
+      } else {
+        orphanSelectors += 1;
+      }
+      continue;
+    }
+    if (decision.action === "space") {
       out.push(" ");
       replacedSpaces += 1;
       continue;
     }
+    if (decision.tally === "bidi") keptBidi += 1;
     out.push(String.fromCodePoint(cp));
   }
 
@@ -261,7 +286,7 @@ function cleanCharacters(text, config, rules) {
   const findings = [];
   for (const [code, n] of [...removed.entries()].sort((a, b) => a[0] - b[0])) {
     const label = names.get(code) || "invisible character";
-    findings.push(finding("characters", "invisible-character", "fixed", `removed ${label} (U+${code.toString(16).toUpperCase().padStart(4, "0")})`, n));
+    findings.push(finding("characters", "invisible-character", "fixed", `removed ${label} (${codeLabel(code)})`, n, [], { [codeLabel(code)]: n }));
   }
   if (orphanSelectors) findings.push(finding("characters", "variation-selector", "fixed", "removed variation selector without a base character that supports it (hidden payload)", orphanSelectors));
   if (keptBidi) findings.push(finding("characters", "bidi-control", "warn", "kept bidi control characters (document contains rtl text)", keptBidi));
@@ -277,18 +302,19 @@ function cleanEntities(text, config, rules) {
   const named = new Map(Object.entries(spec.named || {}).map(([name, code]) => [name, hex(code)]));
   const codes = new Set((spec.numeric_codepoints || []).map(hex));
   const ranges = toRanges(spec.numeric_ranges);
-  let decoded = 0;
+  const decoded = new Map();
   text = text.replace(ENTITY, (whole, decimal, hexadecimal, name) => {
     let code;
     if (name !== undefined) code = named.has(name) ? named.get(name) : null;
     else code = decimal !== undefined ? parseInt(decimal, 10) : parseInt(hexadecimal, 16);
     if (code === null || code > 0x10ffff) return whole;
     if (!codes.has(code) && !inRanges(code, ranges)) return whole;
-    decoded += 1;
+    tally(decoded, whole);
     return String.fromCodePoint(code);
   });
   const findings = [];
-  if (decoded) findings.push(finding("entities", "html-entity", "fixed", "decoded html entities of invisible characters (handled by the characters layer)", decoded));
+  const total = [...decoded.values()].reduce((a, b) => a + b, 0);
+  if (total) findings.push(finding("entities", "html-entity", "fixed", "decoded html entities of invisible characters (handled by the characters layer)", total, [], fromMap(decoded)));
   return { text, findings };
 }
 
@@ -308,45 +334,52 @@ function cleanTypography(text, config, rules) {
   const findings = [];
 
   if (config.straight_quotes !== false) {
-    let count = 0;
+    const byRule = new Map();
     for (const [h, rep] of Object.entries(typo.quotes)) {
       const ch = String.fromCodePoint(hex(h));
       const before = text.split(ch).length - 1;
       if (before) {
-        count += before;
+        tally(byRule, codeLabel(hex(h)), before);
         text = text.split(ch).join(rep);
       }
     }
-    if (count) findings.push(finding("typography", "smart-quote", "fixed", "straightened smart quotes", count));
+    const count = [...byRule.values()].reduce((a, b) => a + b, 0);
+    if (count) findings.push(finding("typography", "smart-quote", "fixed", "straightened smart quotes", count, [], fromMap(byRule)));
   }
 
   if (config.fix_dashes !== false) {
     const policy = { ...typo.dash_policy, ...(config.dash_policy || {}) };
     const spaced = policy.spaced_replacement !== undefined ? policy.spaced_replacement : ", ";
     const unspaced = policy.unspaced_replacement !== undefined ? policy.unspaced_replacement : "-";
+    const byRule = new Map();
     const nRange = countMatches(text, DASH_RANGE);
     text = text.replace(DASH_RANGE, "-");
+    if (nRange) tally(byRule, "range", nRange);
     const nSpaced = countMatches(text, DASH_SPACED);
     text = text.replace(DASH_SPACED, spaced);
+    if (nSpaced) tally(byRule, "spaced", nSpaced);
     const nUnspaced = countMatches(text, DASH_ANY);
     text = text.replace(DASH_ANY, unspaced);
+    if (nUnspaced) tally(byRule, "unspaced", nUnspaced);
     const total = nRange + nSpaced + nUnspaced;
-    if (total) findings.push(finding("typography", "dash", "fixed", "replaced em/en dash per policy", total));
+    if (total) findings.push(finding("typography", "dash", "fixed", "replaced em/en dash per policy", total, [], fromMap(byRule)));
   }
 
   if (config.fix_punctuation !== false) {
-    let count = 0;
+    const byRule = new Map();
     for (const [h, rep] of Object.entries(typo.punctuation)) {
       const ch = String.fromCodePoint(hex(h));
       const before = text.split(ch).length - 1;
       if (before) {
-        count += before;
+        tally(byRule, codeLabel(hex(h)), before);
         text = text.split(ch).join(rep);
       }
     }
     const dots = countMatches(text, DOT_RUN);
     text = text.replace(DOT_RUN, "...");
-    if (count + dots) findings.push(finding("typography", "punctuation", "fixed", "normalized ellipsis and bullet glyphs", count + dots));
+    if (dots) tally(byRule, "dot-run", dots);
+    const total = [...byRule.values()].reduce((a, b) => a + b, 0);
+    if (total) findings.push(finding("typography", "punctuation", "fixed", "normalized ellipsis and bullet glyphs", total, [], fromMap(byRule)));
   }
 
   return { text, findings };
@@ -387,12 +420,14 @@ function cleanHomoglyphs(text, config, rules) {
 
   const suspicious = suspiciousWords(text, table);
   const seen = new Set();
+  const byRule = new Map();
   let total = 0;
   for (const { word } of suspicious) {
     for (const ch of word) {
       const cp = ch.codePointAt(0);
       if (table.has(cp)) {
         seen.add(cp);
+        tally(byRule, codeLabel(cp));
         total += 1;
       }
     }
@@ -410,11 +445,11 @@ function cleanHomoglyphs(text, config, rules) {
     }
     parts.push(text.slice(last));
     text = parts.join("");
-    findings.push(finding("homoglyphs", "confusable", "fixed", "replaced look-alike letters with ascii", total));
+    findings.push(finding("homoglyphs", "confusable", "fixed", "replaced look-alike letters with ascii", total, [], fromMap(byRule)));
   } else {
     const ordered = Object.keys(mapping).map(hex).filter((cp) => seen.has(cp));
     const examples = ordered.slice(0, 8).map((c) => `U+${c.toString(16).toUpperCase().padStart(4, "0")}`);
-    findings.push(finding("homoglyphs", "confusable", "warn", "look-alike letters found (enable replace_homoglyphs or --aggressive to fix)", total, examples));
+    findings.push(finding("homoglyphs", "confusable", "warn", "look-alike letters found (enable replace_homoglyphs or --aggressive to fix)", total, examples, fromMap(byRule)));
   }
   return { text, findings };
 }
@@ -505,28 +540,24 @@ function cleanVoice(text, config, rules) {
   const ignore = new Set((config.ignore_phrases || []).map((p) => p.toLowerCase()));
 
   if (config.fix_safe_delete_phrases !== false) {
-    let removed = 0;
+    const removed = new Map();
     for (const phrase of withoutIgnored(phrases.safe_delete_phrases || [], ignore)) {
       const result = safeDelete(text, phrase);
       text = result.text;
-      removed += result.count;
+      if (result.count) tally(removed, phrase, result.count);
     }
-    if (removed) {
-      findings.push(finding("voice", "filler-phrase", "fixed", "removed filler phrases", removed));
-    }
+    const total = [...removed.values()].reduce((a, b) => a + b, 0);
+    if (total) findings.push(finding("voice", "filler-phrase", "fixed", "removed filler phrases", total, [], fromMap(removed)));
   }
 
   const banned = withoutIgnored([...(phrases.banned_phrases || []), ...(config.custom_banned_phrases || [])], ignore);
-  const bannedHits = [];
-  let bannedTotal = 0;
+  const bannedHits = new Map();
   for (const phrase of banned) {
     const count = countMatches(text, phraseRegex(phrase));
-    if (count) {
-      bannedTotal += count;
-      bannedHits.push(phrase);
-    }
+    if (count) tally(bannedHits, phrase, count);
   }
-  if (bannedTotal) findings.push(finding("voice", "banned-phrase", "error", "ai phrases present (rewrite required, not auto-fixed)", bannedTotal, bannedHits.slice(0, 8)));
+  const bannedTotal = [...bannedHits.values()].reduce((a, b) => a + b, 0);
+  if (bannedTotal) findings.push(finding("voice", "banned-phrase", "error", "ai phrases present (rewrite required, not auto-fixed)", bannedTotal, [...bannedHits.keys()].slice(0, 8), fromMap(bannedHits)));
 
   const shapeErrors = [];
   const shapeWarns = [];
@@ -537,21 +568,57 @@ function cleanVoice(text, config, rules) {
       else shapeErrors.push(shape.id);
     }
   }
-  if (shapeErrors.length) findings.push(finding("voice", "sentence-shape", "error", "ai sentence shapes present (rewrite required, not auto-fixed)", shapeErrors.length, shapeErrors.slice(0, 8)));
-  if (shapeWarns.length) findings.push(finding("voice", "sentence-shape", "warn", "sentence patterns that can read as ai (fine in moderation)", shapeWarns.length, shapeWarns.slice(0, 8)));
+  const once = (ids) => Object.fromEntries(ids.map((id) => [id, 1]));
+  if (shapeErrors.length) findings.push(finding("voice", "sentence-shape", "error", "ai sentence shapes present (rewrite required, not auto-fixed)", shapeErrors.length, shapeErrors.slice(0, 8), once(shapeErrors)));
+  if (shapeWarns.length) findings.push(finding("voice", "sentence-shape", "warn", "sentence patterns that can read as ai (fine in moderation)", shapeWarns.length, shapeWarns.slice(0, 8), once(shapeWarns)));
 
-  let lexTotal = 0;
-  const lexExamples = [];
+  const lexHits = new Map();
   for (const word of withoutIgnored([...(phrases.lexicon_warn || []), ...(phrases.transition_tics_warn || [])], ignore)) {
     const count = countMatches(text, wordRegex(word));
-    if (count) {
-      lexTotal += count;
-      if (lexExamples.length < 8) lexExamples.push(word);
-    }
+    if (count) tally(lexHits, word, count);
   }
-  if (lexTotal) findings.push(finding("voice", "lexicon", "warn", "faux-elegance lexicon found (use sparingly)", lexTotal, lexExamples));
+  const lexTotal = [...lexHits.values()].reduce((a, b) => a + b, 0);
+  if (lexTotal) findings.push(finding("voice", "lexicon", "warn", "faux-elegance lexicon found (use sparingly)", lexTotal, [...lexHits.keys()].slice(0, 8), fromMap(lexHits)));
 
   return { text, findings };
+}
+
+function shapeGlobalRegex(pattern) {
+  return cachedRegex(`shape-all:${pattern}`, () => new RegExp(pattern, "gi"));
+}
+
+function collectHits(hits, segment, offset, re, kind, id, severity) {
+  re.lastIndex = 0;
+  let match;
+  while ((match = re.exec(segment)) !== null) {
+    if (match[0] === "") {
+      re.lastIndex += 1;
+      continue;
+    }
+    hits.push({ start: offset + match.index, end: offset + match.index + match[0].length, kind, id, severity, text: match[0] });
+  }
+}
+
+function findPhrases(text, config, rules) {
+  if (config.voice === false) return [];
+  const phrases = rules.phrases;
+  const ignore = new Set((config.ignore_phrases || []).map((p) => p.toLowerCase()));
+  const fillers = config.fix_safe_delete_phrases !== false ? withoutIgnored(phrases.safe_delete_phrases || [], ignore) : [];
+  const banned = withoutIgnored([...(phrases.banned_phrases || []), ...(config.custom_banned_phrases || [])], ignore);
+  const shapes = (phrases.sentence_shapes || []).filter((shape) => !ignore.has(shape.id.toLowerCase()));
+  const lexicon = withoutIgnored([...(phrases.lexicon_warn || []), ...(phrases.transition_tics_warn || [])], ignore);
+  const hits = [];
+  forEachUnprotected(text, config.protect_code !== false, (segment, offset) => {
+    for (const phrase of fillers) collectHits(hits, segment, offset, phraseRegex(phrase), "filler", phrase, "fixed");
+    for (const phrase of banned) collectHits(hits, segment, offset, phraseRegex(phrase), "banned", phrase, "error");
+    for (const shape of shapes) collectHits(hits, segment, offset, shapeGlobalRegex(shape.pattern), "shape", shape.id, shape.severity || "error");
+    for (const word of lexicon) collectHits(hits, segment, offset, wordRegex(word), "lexicon", word, "warn");
+  });
+  const fillerSpans = hits.filter((hit) => hit.kind === "filler");
+  const insideFiller = (hit) => hit.kind !== "filler" && hit.kind !== "shape" && fillerSpans.some((span) => span.start <= hit.start && hit.end <= span.end);
+  const visible = hits.filter((hit) => !insideFiller(hit));
+  visible.sort((a, b) => a.start - b.start || b.end - a.end);
+  return visible;
 }
 
 function trackingRegex(parameter, values) {
@@ -564,17 +631,53 @@ function trackingSub(match, lead, trailingAmpersand) {
   return trailingAmpersand ? "&" : "";
 }
 
+const ARTIFACT_CLOSERS = ".,;:!?)]}";
+const ARTIFACT_OPENERS = "([{";
+const ARTIFACT_BLANKS = " \t\r\n\u00a0\u202f";
+
+function trimTrailingBlanks(value) {
+  let end = value.length;
+  while (end > 0 && (value[end - 1] === " " || value[end - 1] === "\t")) end -= 1;
+  return value.slice(0, end);
+}
+
+function joinAroundArtifact(out, lead, trail, after) {
+  if (after === "" || after === "\n" || after === "\r" || ARTIFACT_CLOSERS.includes(after)) return trimTrailingBlanks(out);
+  const before = out.slice(-1);
+  if (before === "" || ARTIFACT_BLANKS.includes(before) || ARTIFACT_OPENERS.includes(before)) return out;
+  return out + (lead || trail);
+}
+
+function removeArtifacts(text, re) {
+  let out = "";
+  let last = 0;
+  let count = 0;
+  re.lastIndex = 0;
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    if (match[0] === "") {
+      re.lastIndex += 1;
+      continue;
+    }
+    count += 1;
+    const end = match.index + match[0].length;
+    out = joinAroundArtifact(out + text.slice(last, match.index), match.groups.lead, match.groups.trail, text.charAt(end));
+    last = end;
+  }
+  return { text: out + text.slice(last), count };
+}
+
 function cleanArtifacts(text, config, rules) {
   const spec = rules.artifacts;
   if (!spec) return { text, findings: [] };
   const findings = [];
   const removed = new Map();
   for (const entry of spec.remove_patterns || []) {
-    const re = cachedRegex(`artifact:${entry.id}`, () => new RegExp(entry.pattern, "g"));
-    const n = countMatches(text, re);
-    if (n) {
-      text = text.replace(re, "");
-      removed.set(entry.id, n);
+    const re = cachedRegex(`artifact:${entry.id}`, () => new RegExp(`(?<lead>[ \\t]*)(?:${entry.pattern})(?<trail>[ \\t]*)`, "g"));
+    const result = removeArtifacts(text, re);
+    if (result.count) {
+      text = result.text;
+      removed.set(entry.id, result.count);
     }
   }
   for (const [parameter, values] of Object.entries(spec.url_tracking_params || {})) {
@@ -587,7 +690,7 @@ function cleanArtifacts(text, config, rules) {
   }
   if (removed.size) {
     const total = [...removed.values()].reduce((a, b) => a + b, 0);
-    findings.push(finding("artifacts", "copy-artifact", "fixed", "removed assistant copy artifacts (citation markers, tracking parameters)", total, [...removed.keys()].slice(0, 8)));
+    findings.push(finding("artifacts", "copy-artifact", "fixed", "removed assistant copy artifacts (citation markers, tracking parameters)", total, [...removed.keys()].slice(0, 8), fromMap(removed)));
   }
   const warned = new Map();
   for (const entry of spec.warn_patterns || []) {
@@ -597,7 +700,7 @@ function cleanArtifacts(text, config, rules) {
   }
   if (warned.size) {
     const total = [...warned.values()].reduce((a, b) => a + b, 0);
-    findings.push(finding("artifacts", "copy-artifact", "warn", "assistant upload or session references present (review the link)", total, [...warned.keys()].slice(0, 8)));
+    findings.push(finding("artifacts", "copy-artifact", "warn", "assistant upload or session references present (review the link)", total, [...warned.keys()].slice(0, 8), fromMap(warned)));
   }
   return { text, findings };
 }
@@ -611,4 +714,4 @@ const LAYERS = {
   artifacts: cleanArtifacts,
 };
 
-module.exports = { LAYERS };
+module.exports = { LAYERS, classifyCharacters, findPhrases };

@@ -10,16 +10,16 @@ _DOT_RUN = re.compile(r"\.{4,}")
 
 def _translate_group(text, mapping):
     table = {}
-    count = 0
+    by_rule = {}
     for hex_cp, replacement in mapping.items():
         code = int(hex_cp, 16)
         occurrences = text.count(chr(code))
         if occurrences:
-            count += occurrences
+            by_rule[f"U+{code:04X}"] = occurrences
             table[code] = replacement
     if table:
         text = text.translate(table)
-    return text, count
+    return text, by_rule
 
 
 def clean(text, config, rules):
@@ -27,10 +27,10 @@ def clean(text, config, rules):
     findings = []
 
     if config.get("straight_quotes", True):
-        text, count = _translate_group(text, typo["quotes"])
-        if count:
+        text, by_rule = _translate_group(text, typo["quotes"])
+        if by_rule:
             findings.append(
-                Finding("typography", "smart-quote", "fixed", "straightened smart quotes", count)
+                Finding("typography", "smart-quote", "fixed", "straightened smart quotes", sum(by_rule.values()), [], by_rule)
             )
 
     if config.get("fix_dashes", True):
@@ -43,16 +43,19 @@ def clean(text, config, rules):
         text, n_unspaced = _DASH_ANY.subn(unspaced, text)
         total = n_range + n_spaced + n_unspaced
         if total:
+            by_rule = {name: n for name, n in (("range", n_range), ("spaced", n_spaced), ("unspaced", n_unspaced)) if n}
             findings.append(
-                Finding("typography", "dash", "fixed", "replaced em/en dash per policy", total)
+                Finding("typography", "dash", "fixed", "replaced em/en dash per policy", total, [], by_rule)
             )
 
     if config.get("fix_punctuation", True):
-        text, count = _translate_group(text, typo["punctuation"])
+        text, by_rule = _translate_group(text, typo["punctuation"])
         text, dots = _DOT_RUN.subn("...", text)
-        if count or dots:
+        if dots:
+            by_rule["dot-run"] = dots
+        if by_rule:
             findings.append(
-                Finding("typography", "punctuation", "fixed", "normalized ellipsis and bullet glyphs", count + dots)
+                Finding("typography", "punctuation", "fixed", "normalized ellipsis and bullet glyphs", sum(by_rule.values()), [], by_rule)
             )
 
     return text, findings

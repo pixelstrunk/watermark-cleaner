@@ -5,6 +5,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- Browser entry `watermark-cleaner/browser`: the same cleaner without any file system access, with the rules bundled. Exports `cleanText(text, config?, rules?)` with the CLI defaults, `classifyCharacters(text)` (per code point: `keep`, `remove` or `space` plus the rule name, taken from the same decision table the cleaner uses), `findPhrases(text)` (every voice hit with `start`, `end`, `kind` banned/filler/shape/lexicon, `id`, `severity` and the matched text, code spans excluded, same regexes as the voice layer), the lossless image strippers `stripJpeg`, `stripPng`, `stripWebp` on `Uint8Array`, plus `DEFAULTS` and `RULES`. The Node entry exports the same functions on top of `cleanText`. TypeScript definitions ship with the package.
+- Every finding now carries `by_rule`, the count per rule id: artifacts (`{"chatgpt-citation-token": 2, "utm_source-tracking": 1}`), voice (per phrase, shape id or lexicon word), typography (per code point, dash `range`/`spaced`/`unspaced`, `dot-run`), entities (per entity as written), homoglyphs and characters (per code point). Both CLIs emit it in `--json`.
+- EXIF orientation survives image cleaning. Photos from phones carry the rotation in EXIF tag 0x0112; stripping the whole block made them show sideways. Both CLIs now read the tag before stripping and, when it is 2 to 8, write back a minimal 26-byte EXIF block that contains only this tag: a 36-byte APP1 behind JFIF for JPEG (right after SOI when there is no APP0), an `eXIf` chunk behind IHDR for PNG, a trailing `EXIF` chunk with the VP8X flag kept for WebP. Pixels stay untouched, every other tag is gone, and the report says `kept exif orientation (tag 0x0112), nothing else`. Cleaning an already cleaned photo is a no-op.
+
+### Changed
+
+- **Breaking:** `package.json` now has an `exports` field. Only `watermark-cleaner` and `watermark-cleaner/browser` can be imported; deep imports of `watermark-cleaner/src/...` and `watermark-cleaner/rules_data/...` stop working. Rule data is reachable as `RULES` from the browser entry and `loadRules()` from the Node entry.
+- The Node package is split into file-system-free modules (`defaults.js`, `protect.js`, `pipeline.js`, `layers.js`, `image.js`) and the two entries on top; behaviour of the CLI is unchanged.
+
+### Migration for web integrations (0.3.0 to 0.4.0)
+
+Replace the three deep imports with the browser entry:
+
+```js
+import { cleanText, classifyCharacters, findPhrases, stripJpeg, stripPng, stripWebp, RULES } from "watermark-cleaner/browser";
+```
+
+- A hand-built pipeline (layer order, code protection) becomes `cleanText(text)`; per-rule counters such as "2 citation leftovers, 1 tracking link" come from `report.findings[i].by_rule` instead of running the layer twice with halved rules.
+- A character reveal built on `rules_data/characters.json` becomes `classifyCharacters(text)`; typography glyphs (quotes, dashes) are still a lookup in `RULES.typography`.
+- Phrase highlighting built on `rules_data/phrases.json` becomes `findPhrases(text)`; hits are sorted by start, overlaps are left to the caller, and hits inside a filler phrase that the cleaner deletes are not reported.
+- A copied image stripper becomes `stripJpeg(bytes)`, `stripPng(bytes)`, `stripWebp(bytes)` on a `Uint8Array`; the result has `cleaned`, `stripped` and `orientation`.
+- Delete the local `watermark-cleaner.d.ts` shim, the package ships its own types.
+
+### Fixed
+
+- Removing a copy artifact (`citeturn0search0`, `[cite: 1]`, `【1†source】` and the other `remove_patterns`) no longer leaves a double space behind. One space stays between words, none stays before punctuation (`Fact citeturn0search0.` becomes `Fact.`), and tokens at the start or end of a line take their neighbouring space with them. Both CLIs behave the same and the parity fixtures cover it.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added

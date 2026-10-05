@@ -23,7 +23,7 @@ def clean(text, config, rules):
     named, codes, ranges = _targets(rules)
     if named is None or "&" not in text:
         return text, []
-    decoded = 0
+    decoded = {}
 
     def replace(match):
         nonlocal decoded
@@ -36,7 +36,7 @@ def clean(text, config, rules):
             return match.group(0)
         if code not in codes and not any(start <= code <= end for start, end in ranges):
             return match.group(0)
-        decoded += 1
+        decoded[match.group(0)] = decoded.get(match.group(0), 0) + 1
         return chr(code)
 
     text = _ENTITY.sub(replace, text)
@@ -48,7 +48,9 @@ def clean(text, config, rules):
                 "html-entity",
                 "fixed",
                 "decoded html entities of invisible characters (handled by the characters layer)",
-                decoded,
+                sum(decoded.values()),
+                [],
+                dict(decoded),
             )
         )
     return text, findings

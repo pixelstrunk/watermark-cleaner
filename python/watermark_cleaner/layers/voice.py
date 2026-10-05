@@ -95,13 +95,14 @@ def clean(text, config, rules):
     ignore = {p.lower() for p in config.get("ignore_phrases") or []}
 
     if config.get("fix_safe_delete_phrases", True):
-        removed_total = 0
+        removed = {}
         for phrase in _without_ignored(phrases.get("safe_delete_phrases", []), ignore):
             text, count = _safe_delete(text, phrase)
-            removed_total += count
-        if removed_total:
+            if count:
+                removed[phrase] = removed.get(phrase, 0) + count
+        if removed:
             findings.append(
-                Finding("voice", "filler-phrase", "fixed", "removed filler phrases", removed_total)
+                Finding("voice", "filler-phrase", "fixed", "removed filler phrases", sum(removed.values()), [], removed)
             )
 
     banned = _without_ignored(
@@ -124,6 +125,7 @@ def clean(text, config, rules):
                 "ai phrases present (rewrite required, not auto-fixed)",
                 total,
                 examples,
+                dict(banned_hits),
             )
         )
 
@@ -146,6 +148,7 @@ def clean(text, config, rules):
                 "ai sentence shapes present (rewrite required, not auto-fixed)",
                 len(shape_errors),
                 shape_errors[:8],
+                {shape_id: 1 for shape_id in shape_errors},
             )
         )
     if shape_warns:
@@ -157,29 +160,28 @@ def clean(text, config, rules):
                 "sentence patterns that can read as ai (fine in moderation)",
                 len(shape_warns),
                 shape_warns[:8],
+                {shape_id: 1 for shape_id in shape_warns},
             )
         )
 
-    lexicon_total = 0
-    lexicon_examples = []
+    lexicon_hits = {}
     lexicon = _without_ignored(
         phrases.get("lexicon_warn", []) + phrases.get("transition_tics_warn", []), ignore
     )
     for word in lexicon:
         count = len(_word_regex(word).findall(text))
         if count:
-            lexicon_total += count
-            if len(lexicon_examples) < 8:
-                lexicon_examples.append(word)
-    if lexicon_total:
+            lexicon_hits[word] = lexicon_hits.get(word, 0) + count
+    if lexicon_hits:
         findings.append(
             Finding(
                 "voice",
                 "lexicon",
                 "warn",
                 "faux-elegance lexicon found (use sparingly)",
-                lexicon_total,
-                lexicon_examples,
+                sum(lexicon_hits.values()),
+                list(lexicon_hits)[:8],
+                dict(lexicon_hits),
             )
         )
 

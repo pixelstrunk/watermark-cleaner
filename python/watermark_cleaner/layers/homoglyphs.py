@@ -45,12 +45,14 @@ def clean(text, config, rules):
 
     suspicious = _suspicious_words(text, table)
     seen = set()
+    by_rule = {}
     total = 0
     for match in suspicious:
         for char in match.group(0):
             code = ord(char)
             if code in table:
                 seen.add(code)
+                by_rule[f"U+{code:04X}"] = by_rule.get(f"U+{code:04X}", 0) + 1
                 total += 1
 
     if not total:
@@ -66,7 +68,7 @@ def clean(text, config, rules):
         parts.append(text[last:])
         text = "".join(parts)
         findings.append(
-            Finding("homoglyphs", "confusable", "fixed", "replaced look-alike letters with ascii", total)
+            Finding("homoglyphs", "confusable", "fixed", "replaced look-alike letters with ascii", total, [], by_rule)
         )
     else:
         ordered = [int(hex_cp, 16) for hex_cp in mapping if int(hex_cp, 16) in seen]
@@ -79,6 +81,7 @@ def clean(text, config, rules):
                 "look-alike letters found (enable replace_homoglyphs or --aggressive to fix)",
                 total,
                 examples,
+                by_rule,
             )
         )
     return text, findings

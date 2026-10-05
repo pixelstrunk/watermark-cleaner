@@ -1,21 +1,12 @@
 const fs = require("fs");
 const path = require("path");
 
+const image = require("./image");
 const { isSymlink, writeAtomic } = require("./safeio");
 
 const SVG_METADATA = /<metadata\b[^>]*>[\s\S]*?<\/metadata>/gi;
 const SVG_XMP = /<x:xmpmeta\b[\s\S]*?<\/x:xmpmeta>/gi;
 const SVG_COMMENT = /<!--[\s\S]*?-->/g;
-
-const JPEG_STRIP_MARKERS = new Set([0xe1, 0xeb, 0xed, 0xfe]);
-const JPEG_ICC_MARKER = 0xe2;
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const PNG_STRIP_CHUNKS = new Set(["tEXt", "zTXt", "iTXt", "eXIf", "tIME", "caBX"]);
-const PNG_ICC_CHUNK = "iCCP";
-const WEBP_STRIP_CHUNKS = new Set(["EXIF", "XMP ", "JUMB", "C2PA", "c2pa"]);
-const WEBP_ICC_CHUNK = "ICCP";
-const WEBP_VP8X_CLEAR_FLAGS = 0x08 | 0x04;
-const WEBP_VP8X_ICC_FLAG = 0x20;
 
 const LOSSLESS_SUFFIXES = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const UNSUPPORTED_SUFFIXES = new Set([".gif", ".tif", ".tiff", ".heic", ".heif", ".avif"]);
@@ -94,11 +85,12 @@ function handleBinary(file, report, write, backup, suffix, stripIcc) {
     addFinding(report, "warn", "raster", "could not parse image (file left untouched)", 1);
     return;
   }
-  const { cleaned, stripped } = result;
-  if (!stripped) return;
+  const { cleaned, stripped, orientation } = result;
+  if (!stripped || cleaned.equals(data)) return;
   if (!write) {
     report.changed = true;
     addFinding(report, "fixed", "raster", "embedded metadata present (exif/xmp/icc/c2pa)", stripped);
+    addOrientation(report, orientation);
     return;
   }
   if (isSymlink(file)) {
@@ -109,106 +101,29 @@ function handleBinary(file, report, write, backup, suffix, stripIcc) {
   if (backup) backupFile(file);
   writeAtomic(file, cleaned);
   addFinding(report, "fixed", "raster", "stripped metadata segments losslessly (pixels untouched)", stripped);
+  addOrientation(report, orientation);
+}
+
+function addOrientation(report, orientation) {
+  if (orientation !== null) addFinding(report, "info", "orientation", "kept exif orientation (tag 0x0112), nothing else", 1);
+}
+
+function asBuffer(result) {
+  if (result === null) return null;
+  const { cleaned } = result;
+  return { ...result, cleaned: Buffer.from(cleaned.buffer, cleaned.byteOffset, cleaned.byteLength) };
 }
 
 function stripJpeg(data, stripIcc) {
-  if (data.length < 2 || data[0] !== 0xff || data[1] !== 0xd8) return null;
-  const markers = new Set(JPEG_STRIP_MARKERS);
-  if (stripIcc) markers.add(JPEG_ICC_MARKER);
-  const parts = [Buffer.from([0xff, 0xd8])];
-  let i = 2;
-  let stripped = 0;
-  const n = data.length;
-  let terminated = false;
-  while (i + 1 < n) {
-    if (data[i] !== 0xff) return null;
-    const marker = data[i + 1];
-    if (marker === 0xff) {
-      i += 1;
-      continue;
-    }
-    if (marker === 0xd9 || marker === 0xda) {
-      parts.push(data.subarray(i));
-      terminated = true;
-      break;
-    }
-    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-      parts.push(data.subarray(i, i + 2));
-      i += 2;
-      continue;
-    }
-    if (i + 4 > n) return null;
-    const segLen = data.readUInt16BE(i + 2);
-    const end = i + 2 + segLen;
-    if (segLen < 2 || end > n) return null;
-    if (markers.has(marker)) stripped += 1;
-    else parts.push(data.subarray(i, end));
-    i = end;
-  }
-  if (!terminated) return null;
-  return { cleaned: Buffer.concat(parts), stripped };
+  return asBuffer(image.stripJpeg(data, stripIcc));
 }
 
 function stripPng(data, stripIcc) {
-  if (data.length < 8 || !data.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
-  const chunkTypes = new Set(PNG_STRIP_CHUNKS);
-  if (stripIcc) chunkTypes.add(PNG_ICC_CHUNK);
-  const parts = [PNG_SIGNATURE];
-  let i = 8;
-  let stripped = 0;
-  const n = data.length;
-  while (i < n) {
-    if (i + 8 > n) return null;
-    const length = data.readUInt32BE(i);
-    const chunkType = data.subarray(i + 4, i + 8).toString("latin1");
-    const end = i + 12 + length;
-    if (end > n) return null;
-    if (chunkTypes.has(chunkType)) stripped += 1;
-    else parts.push(data.subarray(i, end));
-    if (chunkType === "IEND") {
-      parts.push(data.subarray(end));
-      break;
-    }
-    i = end;
-  }
-  return { cleaned: Buffer.concat(parts), stripped };
+  return asBuffer(image.stripPng(data, stripIcc));
 }
 
 function stripWebp(data, stripIcc) {
-  if (data.length < 12 || data.subarray(0, 4).toString("latin1") !== "RIFF" || data.subarray(8, 12).toString("latin1") !== "WEBP") return null;
-  const stripSet = new Set(WEBP_STRIP_CHUNKS);
-  let clearFlags = WEBP_VP8X_CLEAR_FLAGS;
-  if (stripIcc) {
-    stripSet.add(WEBP_ICC_CHUNK);
-    clearFlags |= WEBP_VP8X_ICC_FLAG;
-  }
-  const chunks = [];
-  let i = 12;
-  let stripped = 0;
-  const n = data.length;
-  while (i < n) {
-    if (i + 8 > n) return null;
-    const fourcc = data.subarray(i, i + 4).toString("latin1");
-    const size = data.readUInt32LE(i + 4);
-    if (i + 8 + size > n) return null;
-    const end = i + 8 + size + (size % 2);
-    if (stripSet.has(fourcc)) stripped += 1;
-    else chunks.push(Buffer.from(data.subarray(i, Math.min(end, n))));
-    i = end;
-  }
-  if (stripped) {
-    for (const chunk of chunks) {
-      if (chunk.subarray(0, 4).toString("latin1") === "VP8X" && chunk.length >= 9) {
-        chunk[8] &= ~clearFlags & 0xff;
-      }
-    }
-  }
-  const body = Buffer.concat(chunks);
-  const header = Buffer.alloc(12);
-  header.write("RIFF", 0, "latin1");
-  header.writeUInt32LE(body.length + 4, 4);
-  header.write("WEBP", 8, "latin1");
-  return { cleaned: Buffer.concat([header, body]), stripped };
+  return asBuffer(image.stripWebp(data, stripIcc));
 }
 
 function backupFile(file) {

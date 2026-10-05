@@ -1,7 +1,20 @@
 {
   "name": "watermark-cleaner",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Remove AI text artifacts, AI phrases and file metadata before you publish. Detects and strips invisible unicode characters, losslessly cleans image metadata.",
+  "main": "src/core.js",
+  "types": "src/core.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/core.d.ts",
+      "default": "./src/core.js"
+    },
+    "./browser": {
+      "types": "./src/browser.d.ts",
+      "default": "./src/browser.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "watermark-cleaner": "bin/watermark-cleaner.js"
   },

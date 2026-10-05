@@ -195,6 +195,25 @@ The document language is auto-detected by DeepL when `--source-lang` is not give
 
 This back translates the text (source to pivot and back) using a model that is not the one that wrote the text, then runs the deterministic cleaner on the result. It changes word choice, which is what degrades a statistical watermark, but it can shift meaning and it sends your text to DeepL. It is off by default and opt in. Do not use it on confidential content. It cannot certify that any vendor detector will fail.
 
+## Use as a library
+
+The Node package has two entries. `watermark-cleaner` is for Node and loads the rules from disk, `watermark-cleaner/browser` has no file system access and ships the rules bundled, so it works in a web page or a worker. Both export the same functions.
+
+```js
+import { cleanText, classifyCharacters, findPhrases, stripJpeg, RULES } from "watermark-cleaner/browser";
+
+const { text, report } = cleanText(input);
+report.findings[0].by_rule; // { "chatgpt-citation-token": 2, "utm_source-tracking": 1 }
+
+classifyCharacters("a\u200bb"); // [{ index: 1, char: "\u200b", code: 8203, action: "remove", name: "zero width space" }, ...]
+findPhrases("Without further ado, we delve in."); // [{ start: 0, end: 19, kind: "filler", id: "without further ado", severity: "fixed", text: "Without further ado" }, ...]
+stripJpeg(bytes); // { cleaned: Uint8Array, stripped: 2, orientation: 6 } or null when the file does not parse
+```
+
+`cleanText(text, config?, rules?)` takes a partial config merged over the CLI defaults. Deep imports of `src/` and `rules_data/` are not part of the public API; use `RULES` (browser) or `loadRules()` (Node) instead.
+
+In Python, `from watermark_cleaner import clean_text` returns `(text, report)` with the same findings and `by_rule` counts.
+
 ## Rules are one source
 
 All character lists, phrase lists and copy-artifact patterns live in [`rules/*.json`](rules/). The Python and Node packages read the same files, `scripts/sync-rules.sh` copies them into each package, and CI fails when they drift or when the two CLIs produce different output. Edit the rules once, both tools follow. Contributions to the rulebook are the easiest way to help; see [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -158,7 +158,7 @@ class CopyArtifacts(unittest.TestCase):
         cleaned, report = clean(text)
         self.assertEqual(
             cleaned,
-            "Fact  and  and x and  see https://x.io/a?b=1 and https://x.io/b?c=2 and https://x.io/c done.",
+            "Fact and and x and see https://x.io/a?b=1 and https://x.io/b?c=2 and https://x.io/c done.",
         )
         finding = [f for f in report.findings if f.layer == "artifacts"][0]
         self.assertEqual(finding.severity, "fixed")
@@ -179,6 +179,41 @@ class CopyArtifacts(unittest.TestCase):
         text = "`citeturn0search0` stays"
         cleaned, _ = clean(text)
         self.assertEqual(cleaned, text)
+
+    def test_removal_leaves_single_space_and_none_before_punctuation(self):
+        cases = [
+            ("See source citeturn0search0 and more", "See source and more"),
+            ("Fact citeturn0search0.", "Fact."),
+            ("A [cite: 1] b, then 【1†source】!", "A b, then!"),
+            ("(see citeturn0search0) and (citeturn0search0 more)", "(see) and (more)"),
+            ("citeturn0search0 start, end citeturn0search0\nnext", "start, end\nnext"),
+            ("a citeturn0search0 citeturn0search1 b citeturn0search0 citeturn0search1.", "a b."),
+            ("tab\tciteturn0search0\tsep", "tab\tsep"),
+        ]
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(clean(text)[0], expected)
+
+
+class PerRuleCounts(unittest.TestCase):
+    def test_findings_carry_by_rule(self):
+        text = (
+            "Fact citeturn0search0 and citeturn1search2 and https://x.io/a?utm_source=chatgpt.com see "
+            "\u201cq\u201d and \u201cq\u201d fast \u2014 slow 10 \u2013 20 wait\u2026 &#8203;x a\u200bb\u200bc "
+            "delve into the landscape, landscape"
+        )
+        _, report = clean(text)
+        by_kind = {f"{f.layer}/{f.kind}/{f.severity}": f.by_rule for f in report.findings}
+        self.assertEqual(by_kind["artifacts/copy-artifact/fixed"], {"chatgpt-citation-token": 2, "utm_source-tracking": 1})
+        self.assertEqual(by_kind["typography/smart-quote/fixed"], {"U+201C": 2, "U+201D": 2})
+        self.assertEqual(by_kind["typography/dash/fixed"], {"range": 1, "spaced": 1})
+        self.assertEqual(by_kind["typography/punctuation/fixed"], {"U+2026": 1})
+        self.assertEqual(by_kind["entities/html-entity/fixed"], {"&#8203;": 1})
+        self.assertEqual(by_kind["characters/invisible-character/fixed"], {"U+200B": 3})
+        self.assertEqual(by_kind["voice/banned-phrase/error"], {"delve into": 1})
+        self.assertEqual(by_kind["voice/lexicon/warn"], {"delve": 1, "landscape": 2})
+        self.assertTrue(all(isinstance(f.by_rule, dict) for f in report.findings))
+        self.assertIn("by_rule", report.findings[0].to_dict())
 
 
 class DoubleBacktickCode(unittest.TestCase):

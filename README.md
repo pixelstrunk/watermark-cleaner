@@ -207,7 +207,7 @@ report.findings[0].by_rule; // { "chatgpt-citation-token": 2, "utm_source-tracki
 
 classifyCharacters("a\u200bb"); // [{ index: 1, char: "\u200b", code: 8203, action: "remove", name: "zero width space" }, ...]
 findPhrases("Without further ado, we delve in."); // [{ start: 0, end: 19, kind: "filler", id: "without further ado", severity: "fixed", text: "Without further ado" }, ...]
-stripJpeg(bytes); // { cleaned: Uint8Array, stripped: 2, orientation: 6 } or null when the file does not parse
+stripJpeg(bytes); // { cleaned: Uint8Array, stripped: 2, orientation: 6, blocks: [{ kind: "exif", label: "APP1 (EXIF)", bytes: 84 }, ...] } or null when the file does not parse
 ```
 
 `cleanText(text, config?, rules?)` takes a partial config merged over the CLI defaults. Deep imports of `src/` and `rules_data/` are not part of the public API; use `RULES` (browser) or `loadRules()` (Node) instead.

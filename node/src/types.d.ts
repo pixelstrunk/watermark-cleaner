@@ -80,10 +80,19 @@ export interface PhraseHit {
   text: string;
 }
 
+export type ImageBlockKind = "exif" | "xmp" | "iptc" | "c2pa" | "comment" | "timestamp" | "text" | "icc" | "metadata";
+
+export interface ImageBlock {
+  kind: ImageBlockKind;
+  label: string;
+  bytes: number;
+}
+
 export interface ImageResult {
   cleaned: Uint8Array;
   stripped: number;
   orientation: number | null;
+  blocks: ImageBlock[];
 }
 
 export type ImageStripper = (data: Uint8Array, stripIcc?: boolean) => ImageResult | null;

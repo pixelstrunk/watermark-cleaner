@@ -5,9 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-05
+
 ### Added
 
 - Browser entry `watermark-cleaner/browser`: the same cleaner without any file system access, with the rules bundled. Exports `cleanText(text, config?, rules?)` with the CLI defaults, `classifyCharacters(text)` (per code point: `keep`, `remove` or `space` plus the rule name, taken from the same decision table the cleaner uses), `findPhrases(text)` (every voice hit with `start`, `end`, `kind` banned/filler/shape/lexicon, `id`, `severity` and the matched text, code spans excluded, same regexes as the voice layer), the lossless image strippers `stripJpeg`, `stripPng`, `stripWebp` on `Uint8Array`, plus `DEFAULTS` and `RULES`. The Node entry exports the same functions on top of `cleanText`. TypeScript definitions ship with the package.
+- The image strippers report every removed block as `blocks: [{ kind, label, bytes }]` next to the `stripped` total, with `kind` one of `exif`, `xmp`, `iptc`, `c2pa`, `comment`, `timestamp`, `text`, `icc` or `metadata`, so a UI can list what left the file and flag content credentials.
 - Every finding now carries `by_rule`, the count per rule id: artifacts (`{"chatgpt-citation-token": 2, "utm_source-tracking": 1}`), voice (per phrase, shape id or lexicon word), typography (per code point, dash `range`/`spaced`/`unspaced`, `dot-run`), entities (per entity as written), homoglyphs and characters (per code point). Both CLIs emit it in `--json`.
 - EXIF orientation survives image cleaning. Photos from phones carry the rotation in EXIF tag 0x0112; stripping the whole block made them show sideways. Both CLIs now read the tag before stripping and, when it is 2 to 8, write back a minimal 26-byte EXIF block that contains only this tag: a 36-byte APP1 behind JFIF for JPEG (right after SOI when there is no APP0), an `eXIf` chunk behind IHDR for PNG, a trailing `EXIF` chunk with the VP8X flag kept for WebP. Pixels stay untouched, every other tag is gone, and the report says `kept exif orientation (tag 0x0112), nothing else`. Cleaning an already cleaned photo is a no-op.
 
@@ -32,6 +35,7 @@ import { cleanText, classifyCharacters, findPhrases, stripJpeg, stripPng, stripW
 
 ### Fixed
 
+- Findings from text with code spans are merged. Layers that skip code (entities, typography, voice, artifacts) ran once per segment and reported one finding each, so `A citeturn0search0 \`code\` B citeturn1search2` produced two identical copy-artifact findings with count 1. Both CLIs now merge findings with the same layer, kind, severity and message, adding `count` and `by_rule`.
 - Removing a copy artifact (`citeturn0search0`, `[cite: 1]`, `【1†source】` and the other `remove_patterns`) no longer leaves a double space behind. One space stays between words, none stays before punctuation (`Fact citeturn0search0.` becomes `Fact.`), and tokens at the start or end of a line take their neighbouring space with them. Both CLIs behave the same and the parity fixtures cover it.
 
 ## [0.3.0] - 2026-10-02

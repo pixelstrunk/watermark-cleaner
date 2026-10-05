@@ -216,6 +216,24 @@ class PerRuleCounts(unittest.TestCase):
         self.assertIn("by_rule", report.findings[0].to_dict())
 
 
+class MergedFindings(unittest.TestCase):
+    def test_findings_split_by_code_spans_are_merged(self):
+        _, report = clean("A citeturn0search0 `code` B citeturn1search2 and [cite: 1] `more` [cite: 2].")
+        artifacts = [f for f in report.findings if f.layer == "artifacts"]
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(artifacts[0].count, 4)
+        self.assertEqual(artifacts[0].by_rule, {"chatgpt-citation-token": 2, "gemini-citation": 2})
+        self.assertEqual(artifacts[0].examples, ["chatgpt-citation-token", "gemini-citation"])
+        _, voice = clean("We delve into `x` and delve into the landscape, then `y` the landscape again.")
+        banned = [(f.count, f.by_rule) for f in voice.findings if f.kind == "banned-phrase"]
+        self.assertEqual(banned, [(2, {"delve into": 2})])
+        lexicon = [(f.count, f.by_rule) for f in voice.findings if f.kind == "lexicon"]
+        self.assertEqual(lexicon, [(4, {"delve": 2, "landscape": 2})])
+        self.assertEqual(voice.counts()["error"], 2)
+        keys = [(f.layer, f.kind, f.severity, f.message) for f in report.findings]
+        self.assertEqual(len(set(keys)), len(keys))
+
+
 class DoubleBacktickCode(unittest.TestCase):
     def test_double_backtick_span_is_protected(self):
         text = "Use `` a ` b “x” `` here “y”"

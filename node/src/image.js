@@ -14,6 +14,30 @@ const WEBP_VP8X_XMP_FLAG = 0x04;
 const WEBP_VP8X_ICC_FLAG = 0x20;
 
 const EXIF_HEADER = new Uint8Array([0x45, 0x78, 0x69, 0x66, 0x00, 0x00]);
+const XMP_NAMESPACE = "http://ns.adobe.com/x";
+const PNG_XMP_KEYWORD = "XML:com.adobe.xmp";
+const JPEG_BLOCKS = {
+  0xeb: { kind: "c2pa", label: "APP11 (JUMBF, C2PA content credentials)" },
+  0xed: { kind: "iptc", label: "APP13 (Photoshop IPTC)" },
+  0xfe: { kind: "comment", label: "COM (comment)" },
+  0xe2: { kind: "icc", label: "APP2 (ICC profile)" },
+};
+const PNG_BLOCKS = {
+  tEXt: { kind: "text", label: "tEXt (text metadata)" },
+  zTXt: { kind: "text", label: "zTXt (compressed text metadata)" },
+  eXIf: { kind: "exif", label: "eXIf (EXIF)" },
+  tIME: { kind: "timestamp", label: "tIME (last modified)" },
+  caBX: { kind: "c2pa", label: "caBX (C2PA content credentials)" },
+  iCCP: { kind: "icc", label: "iCCP (ICC profile)" },
+};
+const WEBP_BLOCKS = {
+  EXIF: { kind: "exif", label: "EXIF" },
+  "XMP ": { kind: "xmp", label: "XMP" },
+  JUMB: { kind: "c2pa", label: "JUMBF (C2PA content credentials)" },
+  C2PA: { kind: "c2pa", label: "C2PA content credentials" },
+  c2pa: { kind: "c2pa", label: "C2PA content credentials" },
+  ICCP: { kind: "icc", label: "ICCP (ICC profile)" },
+};
 const ORIENTATION_TAG = 0x0112;
 const TIFF_SHORT = 3;
 
@@ -89,6 +113,23 @@ function crc32(bytes) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+function block(spec, bytes) {
+  return { kind: spec.kind, label: spec.label, bytes };
+}
+
+function jpegBlock(marker, payload, bytes) {
+  if (marker !== JPEG_APP1_MARKER) return block(JPEG_BLOCKS[marker] || { kind: "metadata", label: `APP${marker - 0xe0}` }, bytes);
+  if (startsWith(payload, EXIF_HEADER)) return block({ kind: "exif", label: "APP1 (EXIF)" }, bytes);
+  if (ascii(payload, 0, XMP_NAMESPACE.length) === XMP_NAMESPACE) return block({ kind: "xmp", label: "APP1 (XMP)" }, bytes);
+  return block({ kind: "metadata", label: "APP1" }, bytes);
+}
+
+function pngBlock(chunkType, payload, bytes) {
+  if (chunkType !== "iTXt") return block(PNG_BLOCKS[chunkType] || { kind: "metadata", label: chunkType }, bytes);
+  const xmp = ascii(payload, 0, PNG_XMP_KEYWORD.length) === PNG_XMP_KEYWORD;
+  return block(xmp ? { kind: "xmp", label: "iTXt (XMP)" } : { kind: "text", label: "iTXt (international text)" }, bytes);
+}
+
 function readOrientation(tiff) {
   const base = startsWith(tiff, EXIF_HEADER) ? EXIF_HEADER.length : 0;
   if (tiff.length < base + 8) return null;
@@ -140,6 +181,7 @@ function stripJpeg(data, stripIcc) {
   const markers = new Set(JPEG_STRIP_MARKERS);
   if (stripIcc) markers.add(JPEG_ICC_MARKER);
   const segments = [];
+  const blocks = [];
   let i = 2;
   let stripped = 0;
   let orientation = null;
@@ -168,7 +210,9 @@ function stripJpeg(data, stripIcc) {
     if (segLen < 2 || end > n) return null;
     if (markers.has(marker)) {
       stripped += 1;
-      if (marker === JPEG_APP1_MARKER && orientation === null) orientation = readOrientation(data.subarray(i + 4, end));
+      const payload = data.subarray(i + 4, end);
+      blocks.push(jpegBlock(marker, payload, end - i));
+      if (marker === JPEG_APP1_MARKER && orientation === null) orientation = readOrientation(payload);
     } else {
       segments.push(data.subarray(i, end));
     }
@@ -180,7 +224,7 @@ function stripJpeg(data, stripIcc) {
     while (at < segments.length && segments[at][1] === JPEG_APP0_MARKER) at += 1;
     segments.splice(at, 0, jpegOrientationSegment(orientation));
   }
-  return { cleaned: concat([new Uint8Array([0xff, 0xd8]), ...segments]), stripped, orientation };
+  return { cleaned: concat([new Uint8Array([0xff, 0xd8]), ...segments]), stripped, orientation, blocks };
 }
 
 function stripPng(data, stripIcc) {
@@ -188,6 +232,7 @@ function stripPng(data, stripIcc) {
   const chunkTypes = new Set(PNG_STRIP_CHUNKS);
   if (stripIcc) chunkTypes.add(PNG_ICC_CHUNK);
   const parts = [PNG_SIGNATURE];
+  const blocks = [];
   let i = PNG_SIGNATURE.length;
   let stripped = 0;
   let orientation = null;
@@ -201,7 +246,9 @@ function stripPng(data, stripIcc) {
     if (end > n) return null;
     if (chunkTypes.has(chunkType)) {
       stripped += 1;
-      if (chunkType === PNG_EXIF_CHUNK && orientation === null) orientation = readOrientation(data.subarray(i + 8, i + 8 + length));
+      const payload = data.subarray(i + 8, i + 8 + length);
+      blocks.push(pngBlock(chunkType, payload, end - i));
+      if (chunkType === PNG_EXIF_CHUNK && orientation === null) orientation = readOrientation(payload);
     } else {
       parts.push(data.subarray(i, end));
       if (chunkType === "IHDR" && !headerIndex) headerIndex = parts.length - 1;
@@ -213,7 +260,7 @@ function stripPng(data, stripIcc) {
     i = end;
   }
   if (orientation !== null) parts.splice(headerIndex + 1, 0, pngChunk(PNG_EXIF_CHUNK, orientationTiff(orientation)));
-  return { cleaned: concat(parts), stripped, orientation };
+  return { cleaned: concat(parts), stripped, orientation, blocks };
 }
 
 function stripWebp(data, stripIcc) {
@@ -225,6 +272,7 @@ function stripWebp(data, stripIcc) {
     clearFlags |= WEBP_VP8X_ICC_FLAG;
   }
   const chunks = [];
+  const blocks = [];
   let i = 12;
   let stripped = 0;
   let orientation = null;
@@ -238,6 +286,7 @@ function stripWebp(data, stripIcc) {
     const end = i + 8 + size + (size % 2);
     if (stripSet.has(fourcc)) {
       stripped += 1;
+      blocks.push(block(WEBP_BLOCKS[fourcc] || { kind: "metadata", label: fourcc }, Math.min(end, n) - i));
       if (fourcc === WEBP_EXIF_CHUNK && orientation === null) orientation = readOrientation(data.subarray(i + 8, i + 8 + size));
     } else {
       const chunk = Uint8Array.from(data.subarray(i, Math.min(end, n)));
@@ -255,7 +304,7 @@ function stripWebp(data, stripIcc) {
   if (orientation !== null) chunks.push(webpChunk(WEBP_EXIF_CHUNK, orientationTiff(orientation)));
   const body = concat(chunks);
   const riff = concat([asciiBytes("RIFF"), new Uint8Array(u32le(body.length + 4)), asciiBytes("WEBP")]);
-  return { cleaned: concat([riff, body]), stripped, orientation };
+  return { cleaned: concat([riff, body]), stripped, orientation, blocks };
 }
 
 module.exports = { stripJpeg, stripPng, stripWebp, readOrientation, orientationTiff, crc32, equalBytes };

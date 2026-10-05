@@ -1164,6 +1164,48 @@ ok("findings carry per-rule counts", () => {
   assert.ok(result.report.findings.every((f) => typeof f.by_rule === "object"));
 });
 
+ok("image strippers list every removed block with kind, label and bytes", () => {
+  const jpeg = stripJpeg(makeJpeg(true));
+  assert.deepStrictEqual(jpeg.blocks, [
+    { kind: "exif", label: "APP1 (EXIF)", bytes: 4 + 18 },
+    { kind: "comment", label: "COM (comment)", bytes: 4 + 9 },
+  ]);
+  assert.strictEqual(jpeg.blocks.reduce((n, b) => n + b.bytes, 0), makeJpeg(true).length - jpeg.cleaned.length);
+  const xmp = stripJpeg(Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    jpegSegment(0xe1, Buffer.from("http://ns.adobe.com/xap/1.0/\x00<x:xmpmeta/>", "latin1")),
+    jpegSegment(0xeb, Buffer.from("JP\x00\x00jumb", "latin1")),
+    jpegSegment(0xed, Buffer.from("Photoshop 3.0\x00", "latin1")),
+    Buffer.from([0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00]), Buffer.from("scan", "latin1"), Buffer.from([0xff, 0xd9]),
+  ]));
+  assert.deepStrictEqual(xmp.blocks.map((b) => b.kind), ["xmp", "c2pa", "iptc"]);
+  assert.strictEqual(stripJpeg(makeJpeg(false)).blocks.length, 0);
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const png = stripPng(Buffer.concat([sig, pngChunk("IHDR", Buffer.alloc(13)), pngChunk("tEXt", Buffer.from("Comment\x00ai", "latin1")), pngChunk("iTXt", Buffer.from("XML:com.adobe.xmp\x00\x00\x00\x00\x00xmp", "latin1")), pngChunk("tIME", Buffer.alloc(7)), pngChunk("caBX", Buffer.alloc(3)), pngChunk("iCCP", Buffer.alloc(3)), pngChunk("IDAT", Buffer.alloc(1)), pngChunk("IEND", Buffer.alloc(0))]), true);
+  assert.deepStrictEqual(png.blocks.map((b) => [b.kind, b.bytes]), [["text", 22], ["xmp", 37], ["timestamp", 19], ["c2pa", 15], ["icc", 15]]);
+  const webp = stripWebp(makeWebp(true));
+  assert.deepStrictEqual(webp.blocks, [
+    { kind: "exif", label: "EXIF", bytes: 8 + 12 },
+    { kind: "xmp", label: "XMP", bytes: 8 + 11 + 1 },
+  ]);
+  assert.deepStrictEqual(browser.stripJpeg(new Uint8Array(fs.readFileSync(path.join(__dirname, "..", "..", "tests", "fixtures", "parity", "orientation.jpg")))).blocks.map((b) => b.kind), ["exif", "comment"]);
+});
+
+ok("findings split by code spans are merged into one per layer, kind, severity and message", () => {
+  const result = clean("A citeturn0search0 `code` B citeturn1search2 and [cite: 1] `more` [cite: 2].");
+  const artifacts = result.report.findings.filter((f) => f.layer === "artifacts");
+  assert.strictEqual(artifacts.length, 1);
+  assert.strictEqual(artifacts[0].count, 4);
+  assert.deepStrictEqual(artifacts[0].by_rule, { "chatgpt-citation-token": 2, "gemini-citation": 2 });
+  assert.deepStrictEqual(artifacts[0].examples, ["chatgpt-citation-token", "gemini-citation"]);
+  const voice = clean("We delve into `x` and delve into the landscape, then `y` the landscape again.").report;
+  assert.deepStrictEqual(voice.findings.filter((f) => f.kind === "banned-phrase").map((f) => [f.count, f.by_rule]), [[2, { "delve into": 2 }]]);
+  assert.deepStrictEqual(voice.findings.filter((f) => f.kind === "lexicon").map((f) => [f.count, f.by_rule]), [[4, { delve: 2, landscape: 2 }]]);
+  assert.strictEqual(voice.counts.error, 2);
+  const keys = result.report.findings.map((f) => `${f.layer}|${f.kind}|${f.severity}|${f.message}`);
+  assert.strictEqual(new Set(keys).size, keys.length);
+});
+
 ok("double backtick code spans are protected", () => {
   assert.strictEqual(clean("Use `` a ` b “x” `` here “y”").text, 'Use `` a ` b “x” `` here "y"');
 });

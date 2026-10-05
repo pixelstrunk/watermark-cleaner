@@ -1,7 +1,7 @@
 import re
 
 from .config import DEFAULTS
-from .findings import Report
+from .findings import Finding, Report
 from .layers import artifacts, characters, entities, homoglyphs, typography, voice
 from .rules import load_rules
 
@@ -45,6 +45,28 @@ def _run_on_unprotected(func, text, config, rules):
     return "".join(parts), findings
 
 
+_EXAMPLE_LIMIT = 8
+
+
+def _merge_findings(findings):
+    merged = {}
+    for f in findings:
+        key = (f.layer, f.kind, f.severity, f.message)
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = Finding(f.layer, f.kind, f.severity, f.message, f.count, list(f.examples), dict(f.by_rule))
+            continue
+        existing.count += f.count
+        for example in f.examples:
+            if len(existing.examples) >= _EXAMPLE_LIMIT:
+                break
+            if example not in existing.examples:
+                existing.examples.append(example)
+        for rule, n in f.by_rule.items():
+            existing.by_rule[rule] = existing.by_rule.get(rule, 0) + n
+    return list(merged.values())
+
+
 def clean_text(text, config=None, rules=None, path="<text>"):
     config = config or dict(DEFAULTS)
     rules = rules or load_rules()
@@ -63,7 +85,7 @@ def clean_text(text, config=None, rules=None, path="<text>"):
 
     report = Report(
         path=path,
-        findings=findings,
+        findings=_merge_findings(findings),
         original_length=len(original),
         cleaned_length=len(text),
         changed=text != original,
